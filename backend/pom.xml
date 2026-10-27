@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CPDTS backend - MINIMUM Maven configuration required to run Flyway.
+
+  Approved scope for this phase: migrations only.
+  No Spring Boot application code and no business APIs are created here;
+  the Spring Boot skeleton is a later, separately approved phase.
+
+  Migrations live in: backend/src/main/resources/db/migration (V1__*.sql, V2__*.sql, ...)
+
+  How to run (from the repository root, after creating the databases and
+  filling in your LOCAL .env.backend file - never share its values):
+
+      powershell -File scripts\run_db.ps1 -Task info    -Database test
+      powershell -File scripts\run_db.ps1 -Task migrate -Database test
+      powershell -File scripts\run_db.ps1 -Task test    -Database test
+      powershell -File scripts\run_db.ps1 -Task migrate -Database dev
+
+  The three environment variables consumed below are injected by scripts\run_db.ps1:
+      CPDTS_DB_URL       e.g. jdbc:postgresql://localhost:5432/cpdts_test
+      CPDTS_DB_USER      database role
+      CPDTS_DB_PASSWORD  database password (local only, never committed)
+
+  Versions were taken from Maven Central metadata (checked 2026-10-27):
+      flyway-maven-plugin 13.11.1 (latest release)
+      org.postgresql:postgresql  42.7.14 (latest release)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Provisional coordinates; rename together with the Spring Boot skeleton if desired. -->
+    <groupId>com.cpdts</groupId>
+    <artifactId>cpdts-backend</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>CPDTS Backend</name>
+    <description>Customer Payment and Debt Tracking System backend (Flyway migrations phase)</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>21</maven.compiler.release>
+        <flyway.version>13.11.1</flyway.version>
+        <postgresql.version>42.7.14</postgresql.version>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+
+                <!--
+                  JDBC driver for the Flyway plugin itself, plus the PostgreSQL
+                  database support module (Flyway 10+ keeps per-database support
+                  in separate artifacts; without it Flyway fails with
+                  "No Flyway database plugin found to handle jdbc:postgresql").
+                -->
+                <dependencies>
+                    <dependency>
+                        <groupId>org.postgresql</groupId>
+                        <artifactId>postgresql</artifactId>
+                        <version>${postgresql.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-database-postgresql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                </dependencies>
+
+                <configuration>
+                    <url>${env.CPDTS_DB_URL}</url>
+                    <user>${env.CPDTS_DB_USER}</user>
+                    <password>${env.CPDTS_DB_PASSWORD}</password>
+                    <locations>
+                        <location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
+                    </locations>
+                    <table>flyway_schema_history</table>
+                    <connectRetries>3</connectRetries>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
