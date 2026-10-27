@@ -1,0 +1,30 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+!.env.backend.example
+!.env.frontend.example
+*.pem
+*.key
+
+# Java
+backend/target/
+*.class
+.gradle/
+
+# JS
+node_modules/
+dist/
+build/
+.next/
+coverage/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
