@@ -1,53 +1,107 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  CPDTS backend - MINIMUM Maven configuration required to run Flyway.
+  CPDTS backend - minimal Spring Boot foundation with Flyway migrations.
 
-  Approved scope for this phase: migrations only.
-  No Spring Boot application code and no business APIs are created here;
-  the Spring Boot skeleton is a later, separately approved phase.
+  Scope for this phase:
+    * Minimal Spring Boot application that starts, connects to PostgreSQL,
+      runs/validates the Flyway migrations, and exposes GET /actuator/health.
+    * NO authentication, NO business APIs, NO frontend.
 
-  Migrations live in: backend/src/main/resources/db/migration (V1__*.sql, V2__*.sql, ...)
+  Migrations live in: backend/src/main/resources/db/migration (V1__*.sql, ...)
+  and are applied identically by BOTH:
+    * Spring Boot at application startup (spring.flyway.* in application.properties)
+    * the Flyway Maven plugin (configuration below) through scripts\run_db.ps1
 
-  How to run (from the repository root, after creating the databases and
-  filling in your LOCAL .env.backend file - never share its values):
+  How to run the application (from backend\, after filling in your LOCAL
+  .env.backend file - never share its values):
 
-      powershell -File scripts\run_db.ps1 -Task info    -Database test
-      powershell -File scripts\run_db.ps1 -Task migrate -Database test
-      powershell -File scripts\run_db.ps1 -Task test    -Database test
-      powershell -File scripts\run_db.ps1 -Task migrate -Database dev
+      # set CPDTS_DB_URL, CPDTS_DB_USER, CPDTS_DB_PASSWORD from .env.backend
+      # (the same three variables scripts\run_db.ps1 injects for the CLI)
+      mvn spring-boot:run
 
-  The three environment variables consumed below are injected by scripts\run_db.ps1:
-      CPDTS_DB_URL       e.g. jdbc:postgresql://localhost:5432/cpdts_test
-      CPDTS_DB_USER      database role
-      CPDTS_DB_PASSWORD  database password (local only, never committed)
+  Health check: GET http://localhost:8080/actuator/health
 
-  Versions were taken from Maven Central metadata (checked 2026-10-27):
-      flyway-maven-plugin 13.11.1 (latest release)
-      org.postgresql:postgresql  42.7.14 (latest release)
+  Versions (verified from Maven Central metadata, checked 2026-10-27):
+      Spring Boot  4.1.2  (current stable release; 4.2.0-RC1 excluded)
+      Flyway       13.11.1 - the flyway.version property below OVERRIDES the
+                     Spring Boot BOM default (12.4.0) so the Maven plugin and
+                     the application runtime use ONE identical Flyway version
+      PostgreSQL   42.7.14 (identical to the Spring Boot BOM value)
+      Java         21
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- Provisional coordinates; rename together with the Spring Boot skeleton if desired. -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.2</version>
+        <relativePath/>
+    </parent>
+
+    <!-- Provisional coordinates; rename together with later backend phases if desired. -->
     <groupId>com.cpdts</groupId>
     <artifactId>cpdts-backend</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>CPDTS Backend</name>
-    <description>Customer Payment and Debt Tracking System backend (Flyway migrations phase)</description>
+    <description>Customer Payment and Debt Tracking System backend (minimal Spring Boot foundation)</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
+        <!-- Single Flyway version for Maven plugin AND application runtime. -->
         <flyway.version>13.11.1</flyway.version>
         <postgresql.version>42.7.14</postgresql.version>
     </properties>
 
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- Spring Boot 4 modular layout: Flyway auto-configuration lives here
+             (starter-jdbc does NOT include it). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <!-- Required since Flyway 10+ for PostgreSQL, same reason as the
+             flyway-maven-plugin dependencies below. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
+            <!-- Executable jar (repackage goal is managed by the Spring Boot parent). -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
             <plugin>
                 <groupId>org.flywaydb</groupId>
                 <artifactId>flyway-maven-plugin</artifactId>
