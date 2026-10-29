@@ -100,10 +100,30 @@ public abstract class CpdtsIntegrationTest {
 
     /** Bulk cleanup of every row the test suite created (scratch test DB). */
     protected void deleteAllTestUsers() {
+        // Audit rows are append-only (V4 trigger) and reference their actor
+        // via audit_logs.actor_user_id (FK -> users): a test user who PERFORMED
+        // an audited action can never be deleted from this database. Cleanup
+        // therefore:
+        //   1. clears memberships of ALL test users (memberships are mutable),
+        //   2. deletes test users that are NOT audit actors,
+        //   3. clears any leftover platform-admin flag on survivors, because
+        //      PlatformAdminBootstrapperTest requires zero platform admins
+        //      before it runs (and would otherwise hit the FK in step 2).
+        // Tests that need an audit actor reuse a fixed fixture email instead
+        // of creating a fresh one each run.
         jdbc.update("""
                 DELETE FROM company_memberships
                 WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%@example.test')
                 """);
-        jdbc.update("DELETE FROM users WHERE email LIKE '%@example.test'");
+        jdbc.update("""
+                DELETE FROM users
+                WHERE email LIKE '%@example.test'
+                  AND id NOT IN (SELECT actor_user_id FROM audit_logs
+                                 WHERE actor_user_id IS NOT NULL)
+                """);
+        jdbc.update("""
+                UPDATE users SET is_platform_admin = FALSE, updated_at = now()
+                WHERE is_platform_admin AND email LIKE '%@example.test'
+                """);
     }
 }

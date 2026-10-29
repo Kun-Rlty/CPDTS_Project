@@ -91,6 +91,22 @@ class PlatformAdminBootstrapperTest extends CpdtsIntegrationTest {
     }
 
     @Test
+    void normalizesTheEmailToTrimmedLowercaseBeforeStoring() {
+        // Regression: bootstrap, login and user creation all normalize
+        // through the shared EmailNormalizer, so a mixed-case entry with
+        // surrounding whitespace becomes the same canonical identity
+        // everywhere (and no second account can diverge by typing case).
+        String created = bootstrapper().createInitialPlatformAdmin(
+                "  Mixed.Case.Admin@Example.TEST  ", "Mixed Case Admin", ADMIN_PASSWORD);
+
+        String expected = "mixed.case.admin@example.test";
+        assertThat(created).isEqualTo(expected);
+        assertThat(jdbc.queryForObject(
+                "SELECT email FROM users WHERE email = ?", String.class, expected))
+                .isEqualTo(expected);
+    }
+
+    @Test
     void adminRecordAndAuditEventShareOneTransaction() throws Exception {
         String email = uniqueEmail("bootstrap-atomic");
 

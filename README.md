@@ -2,11 +2,11 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V6) and Spring Boot backend are implemented and tested locally. The authentication and company-access foundation is implemented (see below). Customers, invoices, payments, reporting and the frontend are NOT implemented yet.
+**Status:** Database foundation (Flyway V1–V6) and Spring Boot backend are implemented and tested locally. The authentication and company-access foundation plus user & company-membership management APIs are implemented (see below). Customers, invoices, payments, reporting and the frontend are NOT implemented yet.
 
-## Current phase: authentication and company-access foundation (implemented)
+## Current phase: authentication, company access & user management (implemented)
 
-What is implemented and covered by automated tests (43 tests against the real `cpdts_test` database):
+What is implemented and covered by automated tests (72 tests against the real `cpdts_test` database):
 
 - **Session-based authentication (provisional decision):** login/logout via `POST/GET /api/v1/auth/*`; server-side HTTP sessions with BCrypt (cost 10) password hashes. JWT is NOT used; the token strategy in `docs/TECHNICAL_REQUIREMENTS.md` section 14 remains an open decision and sessions are the reversible default until that is approved.
 - **UTF-8 password limit:** passwords are limited to 12–72 UTF-8 **bytes** (bcrypt's hard limit is byte-based). Over-long input is rejected up front — never silently truncated.
@@ -15,11 +15,17 @@ What is implemented and covered by automated tests (43 tests against the real `c
 - **Company access checks:** only ACTIVE memberships in ACTIVE companies grant permissions; users without a membership have no access to that company; the platform administrator (a `users.is_platform_admin` flag, set only by the one-time bootstrap) has every permission in both companies without memberships. Checks run server-side on every request (fresh from the database).
 - **One-time platform-admin bootstrap:** `com.cpdts.bootstrap.PlatformAdminBootstrap` creates the first administrator with a privately read password (no-echo console; refuses without one unless explicitly overridden) and writes the admin record and its `PLATFORM_ADMIN_BOOTSTRAPPED` audit event in ONE database transaction. A second platform admin can never be created by this command. See "Creating the first platform administrator" below.
 - **Database-enforced rules (migrations V1–V3):** one role per company membership; a payment's recorder can never verify it (trigger `tg_payment_verifications_verifier`); financial tables are append-only.
+- **User and company-membership management APIs** (all permission-checked per target company with `USER_MANAGE`, CSRF-protected, audit-logged in the same transaction as the change):
+  - `GET /api/v1/companies/{companyId}/users` — list a company's members (role, membership status, global user status; password hashes are never returned).
+  - `POST /api/v1/companies/{companyId}/users` — create a new ACTIVE user with an ACTIVE membership (password via the existing `PasswordPolicy`, stored as BCrypt; `is_platform_admin` is always written FALSE), **or** attach an existing user to the company — platform administrator only, password must be absent, existing profile/credentials never touched. If the email is already registered anywhere in the system, a company admin receives a generic 409 conflict that does not reveal whether the account is in their own company or elsewhere.
+  - `PATCH /api/v1/companies/{companyId}/users/{userId}/membership` — change the membership role and/or activate/deactivate it; effects are immediate (permissions are re-resolved from the database on every request).
+  - Rules: platform admins manage both companies; company admins only their own (cross-company → 403, unknown company → 403 fail-closed). `PLATFORM_ADMIN` role cannot be assigned (403) and `is_platform_admin` is not writable through any API. Duplicate membership → 409; membership outside the addressed company → 404. Audit events: `USER_CREATED`, `MEMBERSHIP_CREATED`, `MEMBERSHIP_ROLE_CHANGED`, `MEMBERSHIP_STATUS_CHANGED` with the acting session user as actor.
+- **Consistent email identity:** login, the bootstrap and user creation all normalize emails through one shared helper (trimmed, lowercased with `Locale.ROOT`), so the same address always resolves to a single account regardless of typing case. Live data in both databases was verified collision-free before this rule was enforced — no migration or account rewrite was needed.
+- **Stable HTTP error contract:** unsupported methods on known endpoints return 405 with an `Allow` header and a JSON body (previously 500); authentication and CSRF checks still run before method routing, and non-numeric path variables return 400.
 
 What is NOT implemented yet (future approved phases):
 
-- **User and membership management APIs** (create/update users, assign roles) — the `USER_MANAGE` permission is seeded but no management endpoints exist, so company administrators cannot yet manage users anywhere. Platform-admin status cannot be granted or revoked through any API; only the bootstrap writes it.
-- **Audit events for membership/permission changes** — will be added together with the management APIs (the bootstrap-creation audit event IS implemented).
+- **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Payment-service layer enforcement of recorder ≠ verifier** — the database trigger already blocks it; the service-level check arrives with the payments phase.
 - Customers, invoices, payments, reporting, frontend.

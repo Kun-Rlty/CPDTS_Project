@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import com.cpdts.security.EmailNormalizer;
 import com.cpdts.security.PasswordPolicy;
 
 /**
@@ -61,7 +62,7 @@ public final class PlatformAdminBootstrapper {
     String createInitialPlatformAdmin(String email, String fullName, String rawPassword,
             int expectedSchemaVersion) {
 
-        String normalizedEmail = email == null ? "" : email.trim().toLowerCase();
+        String normalizedEmail = EmailNormalizer.normalize(email);
         String normalizedFullName = fullName == null ? "" : fullName.trim();
         if (normalizedEmail.isEmpty() || !normalizedEmail.contains("@")) {
             throw new IllegalArgumentException("a valid email is required");

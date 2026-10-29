@@ -309,6 +309,69 @@ class AuthEndpointTest extends CpdtsIntegrationTest {
                 .andExpect(status().isOk()); // logout of an anonymous call is a safe no-op
     }
 
+    @Test
+    void loginIsCaseAndWhitespaceInsensitiveForTheEmail() throws Exception {
+        // Regression: login, bootstrap and user creation must normalize the
+        // email identically (shared EmailNormalizer) or the same person could
+        // fail to reach their account depending on typing case.
+        String email = uniqueEmail("login-case");
+        long userId = insertUser(email, PASSWORD, "ACTIVE", false);
+        addMembership(userId, "JMX", "VIEWER", "ACTIVE");
+        int at = email.indexOf('@');
+        String local = email.substring(0, at);
+        String domain = email.substring(at + 1);
+
+        // Whole address uppercase resolves to the SAME account and reports
+        // the canonical (stored) lowercase address back.
+        mockMvc.perform(login(email.toUpperCase(java.util.Locale.ROOT), PASSWORD))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.id").value(userId))
+                .andExpect(jsonPath("$.user.email").value(email));
+
+        // Domain uppercase only:
+        mockMvc.perform(login(local + "@" + domain.toUpperCase(java.util.Locale.ROOT), PASSWORD))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.id").value(userId));
+
+        // Surrounding whitespace is trimmed:
+        mockMvc.perform(login("    " + email + "    ", PASSWORD))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.id").value(userId));
+
+        // No duplicate identity was created along the way.
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM users WHERE lower(email) = ?",
+                Long.class, email)).isEqualTo(1);
+    }
+
+    @Test
+    void unsupportedMethodsOnTheLoginEndpointReturn405AfterAuthentication() throws Exception {
+        String email = uniqueEmail("login-405");
+        insertUser(email, PASSWORD, "ACTIVE", false);
+        MockHttpSession session = (MockHttpSession) mockMvc.perform(login(email, PASSWORD))
+                .andExpect(status().isOk())
+                .andReturn().getRequest().getSession(false);
+
+        // GET is a known path but not a supported method here: 405 + Allow,
+        // NOT the generic 500 the catch-all used to produce. (The login route
+        // is public - permitAll in SecurityConfig - so even anonymous calls
+        // correctly reach method routing.)
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/login").session(session))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.error").value("method_not_allowed"))
+                .andReturn();
+        assertThat(result.getResponse().getHeader("Allow")).isEqualTo("POST");
+        mockMvc.perform(get("/api/v1/auth/login"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.error").value("method_not_allowed"));
+
+        // Security ordering is untouched on PROTECTED routes: without
+        // authentication the request is rejected by the filter chain and
+        // never reaches method routing (no 405/404 oracle for anon callers).
+        mockMvc.perform(get("/api/v1/companies/1/users"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("unauthenticated"));
+    }
+
     private static MockHttpServletRequestBuilder login(String email, String password) {
         return post("/api/v1/auth/login")
                 .with(csrf())

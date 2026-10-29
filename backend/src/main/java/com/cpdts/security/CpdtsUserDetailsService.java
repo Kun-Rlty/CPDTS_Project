@@ -27,7 +27,7 @@ public class CpdtsUserDetailsService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        UserRow user = users.findByEmail(email == null ? "" : email.trim())
+        UserRow user = users.findByEmail(EmailNormalizer.normalize(email))
                 .orElseThrow(() -> new UsernameNotFoundException("user not found"));
         return new CpdtsUserDetails(user.id(), user.email(), user.fullName(), user.passwordHash());
     }

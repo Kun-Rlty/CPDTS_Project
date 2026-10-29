@@ -102,15 +102,33 @@ Authorization tests pass before financial modules are opened to users.
 
 Implemented and covered by automated tests:
 - Task 1 (sign-in + hashing): session-based login/logout, BCrypt (cost 10), passwords limited to 12–72 UTF-8 bytes (bcrypt's byte limit, no silent truncation), session-ID rotation on login, session invalidation on logout, deactivation ends live sessions.
-- Task 2 (data model): users/roles/permissions/memberships from migration V1; role/permission catalogue and matrix seeded by V6 (7 permissions, 5 roles); one role per company membership enforced by the database. *Management APIs for users/memberships are NOT part of this foundation and do not exist yet.*
+- Task 2 (data model): users/roles/permissions/memberships from migration V1; role/permission catalogue and matrix seeded by V6 (7 permissions, 5 roles); one role per company membership enforced by the database. *User/membership management APIs are now implemented — see the 2026-10-29 status note below.*
 - Task 3 (trusted company context): `AccessControlService` resolves permissions per request from active memberships in active companies; unknown users/companies fail closed.
 - Task 4 (authorization checks): the permission-checking infrastructure is in place and tested; it applies to the authentication endpoints themselves today. Business endpoints that must call it arrive in Phases 4–8.
 - Task 5 (platform-admin rules): `users.is_platform_admin` grants every permission in both companies without memberships; the flag is written only by the one-time bootstrap and cannot be obtained through any API.
 - Task 7 (secure bootstrap): one-time `PlatformAdminBootstrap` command; password read only via a no-echo console (refuses otherwise unless explicitly overridden); schema-version guard; advisory lock; second-admin refusal; admin record and `PLATFORM_ADMIN_BOOTSTRAPPED` audit event committed atomically in one transaction.
 
+### Status note (2026-10-29 — user and membership management delivered)
+
+Task 2 remainder and Task 6 are implemented and covered by automated tests (23 new tests; 66 total against the real `cpdts_test` database):
+- `GET /api/v1/companies/{companyId}/users` — list a company's members (role + membership status + global user status; password hashes never returned).
+- `POST /api/v1/companies/{companyId}/users` — create a new ACTIVE user (password validated by `PasswordPolicy`, stored as BCrypt, `is_platform_admin` always written FALSE) with an ACTIVE membership; or attach an EXISTING user to the company — the platform administrator only, with no password accepted (no credential resets) and no profile rewrite.
+- `PATCH /api/v1/companies/{companyId}/users/{userId}/membership` — change the membership role and/or activate/deactivate it; changes take effect immediately (permissions are resolved from the database per request).
+- Every operation requires `USER_MANAGE` in the TARGET company (platform admin: both; company admin: own company only — cross-company calls fail with 403). `PLATFORM_ADMIN` role assignment is refused with 403; `is_platform_admin` is not writable through any endpoint.
+- Audit events `USER_CREATED`, `MEMBERSHIP_CREATED`, `MEMBERSHIP_ROLE_CHANGED`, `MEMBERSHIP_STATUS_CHANGED` are written in the SAME transaction as the change (rollback verified by test), with the acting session's user as actor and minimized JSON data (never passwords/hashes). Duplicate membership → 409; membership outside the addressed company → 404 (no cross-company disclosure); unknown company → 403 (fail closed).
+- Concurrency: racing duplicate membership inserts are converted to 409 by the V1 unique constraint (`company_id, user_id`) within the transaction.
+
+### Status note (2026-10-29 — reported issues fixed before commit)
+
+- **Email normalization is now consistent everywhere.** Login (`AuthService`, `CpdtsUserDetailsService`), the one-time bootstrap and user creation all normalize through one shared `EmailNormalizer` (trimmed, lowercased with `Locale.ROOT` — the bootstrap previously used the default-locale `toLowerCase()`, a latent bug in e.g. Turkish locales). Before enforcing this, both live databases were inspected read-only: every stored email was already trimmed and lowercase and no case-insensitive collisions existed, so NO migration and no account rewrite/merge was required.
+- **Creation conflicts no longer disclose outside accounts.** A company admin creating (or "attaching") a user whose email is already registered anywhere receives the SAME generic 409 `{"error":"conflict","message":"a user with this email already exists"}` as an in-company duplicate — byte-identical responses, so the endpoint cannot be used to probe for registered emails outside their company (previously a 403 naming the platform-admin attach flow). The platform-admin attach flow is unchanged (201 in another company, 409 for an in-company duplicate, 400 if a password is supplied). A concurrent-create unique-violation race is mapped to the same generic 409 instead of a 500.
+- **405 instead of 500 for unsupported methods on known endpoints.** `ApiExceptionHandler` now maps `HttpRequestMethodNotSupportedException` to `405 {"error":"method_not_allowed"}` with an `Allow` header. Security ordering is unchanged and tested: authentication (protected routes) and CSRF (unsafe methods) still reject requests before MVC method routing.
+- Regression tests: case/whitespace-insensitive login; bootstrap email normalization; byte-identical conflict equivalence (own-company vs outside account, incl. a mixed-case probe); cross-case attach resolves to one identity; 405 + `Allow` on login and management routes plus CSRF/authentication ordering. Test count: 66 → 72, all green.
+
+Intentionally OUT of scope for these APIs (approved decision — global user data must not be reachable by company admins):
+- No global user directory (listing is company-scoped only); no global user status change, profile edit or password change/reset for EXISTING users; no account recovery. Adding an existing user to a second company requires the platform administrator.
+
 Remaining for later phases:
-- Task 2 remainder: user and membership management APIs (the `USER_MANAGE` permission is seeded and waiting).
-- Task 6: audit events for membership/permission changes (to be added together with those management APIs).
 - Task 4 remainder: recorder ≠ verifier service-layer check in the payments phase (already database-enforced by trigger `tg_payment_verifications_verifier` since V3).
 
 ## 6. Phase 4 — Customer management

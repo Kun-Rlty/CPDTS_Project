@@ -20,6 +20,7 @@ import com.cpdts.repository.UserRepository.UserRow;
 import com.cpdts.security.CpdtsAuthenticationToken;
 import com.cpdts.security.CpdtsPrincipal;
 import com.cpdts.security.CpdtsUserDetails;
+import com.cpdts.security.EmailNormalizer;
 import com.cpdts.security.PasswordPolicy;
 import com.cpdts.web.AuthController.AuthSessionResponse;
 import com.cpdts.web.AuthController.CompanyDto;
@@ -68,7 +69,7 @@ public class AuthService {
     public AuthSessionResponse login(String email, String password,
             HttpServletRequest request, HttpServletResponse response) {
 
-        String normalizedEmail = email == null ? "" : email.trim();
+        String normalizedEmail = EmailNormalizer.normalize(email);
         String rawPassword = password == null ? "" : password;
         if (normalizedEmail.isEmpty() || rawPassword.isEmpty()) {
             throw new IllegalArgumentException("email and password are required");
