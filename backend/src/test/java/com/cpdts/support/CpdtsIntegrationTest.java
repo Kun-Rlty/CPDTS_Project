@@ -126,4 +126,26 @@ public abstract class CpdtsIntegrationTest {
                 WHERE is_platform_admin AND email LIKE '%@example.test'
                 """);
     }
+
+    /**
+     * Empties the customers table so customer tests start from a
+     * deterministic state (scratch test DB only; tests own their rows).
+     *
+     * <p>TRUNCATE is the ONLY cleanup path: V2 installs a row-level
+     * BEFORE DELETE trigger that blocks every customer DELETE, and TRUNCATE
+     * does not fire row-level triggers. CASCADE is REQUIRED, not a shortcut:
+     * V2/V3 install composite foreign keys INTO customers (invoices and
+     * payments reference it), and PostgreSQL refuses to truncate a referenced
+     * table alone. The cascade reaches exactly the tenant financial tables
+     * (invoices, invoice_items, payments, payment_allocations,
+     * payment_verifications), which hold no rows while those phases are not
+     * built yet; once they do, those phases must clear their own tables in
+     * their own helpers and this comment must be revisited. The number
+     * sequence counters are NOT truncated (no FK) and tests assert them
+     * relatively. Real databases are never truncated: the application
+     * exposes no delete at all.
+     */
+    protected void clearTestCustomers() {
+        jdbc.execute("TRUNCATE TABLE customers RESTART IDENTITY CASCADE");
+    }
 }

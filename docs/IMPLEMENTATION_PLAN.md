@@ -148,6 +148,17 @@ Remaining for later phases:
 ### Exit criteria
 Customer workflow works end-to-end for both companies without data leakage.
 
+### Status note (2026-10-29 — customer management backend delivered)
+
+Tasks 1–4 are implemented and covered by automated tests (13 new tests; 85 total against the real `cpdts_test` database). Task 5 (frontend) remains:
+- `GET /api/v1/companies/{companyId}/customers` — bounded pagination (`page` ≥ 0, 1 ≤ `size` ≤ 100, default 20) plus optional `status` filter and `q` search over display name / customer code / email / phone, ILIKE-escaped (`%`, `_`, `\` match literally) and always scoped to the authorized company.
+- `POST /api/v1/companies/{companyId}/customers` — server-generated customer code (`JMX-CUST-00001` style, derived from the approved `JMX-INV-00001` convention in V3/V5 with a `CUST` segment); the counter row (`number_sequences`, kind `CUSTOMER`) is locked and incremented inside the creation transaction, so concurrent creates receive distinct contiguous numbers and a company's counter is never touched by the other company. Client-supplied code/company/id fields are never read.
+- `GET`/`PATCH /api/v1/companies/{companyId}/customers/{customerId}` — detail and update; PATCH changes only the provided fields (null = unchanged, empty string clears a nullable field) and doubles as activate/deactivate via `status`. A customer of another company is indistinguishable from a nonexistent one (404); unknown company → 403 (fail closed).
+- Permissions: `RECORD_VIEW` for reads, `CUSTOMER_MANAGE` for mutations, resolved per request by `AccessControlService` (platform admin: both companies; company admin/others: own company only). No hard delete anywhere: no DELETE endpoint exists and the V2 database trigger blocks deletes; deactivation is a status change.
+- Audit: `CUSTOMER_CREATED` (code/name/status summary) and `CUSTOMER_UPDATED` (changed-fields-only diff; `notes` deliberately excluded as unbounded TEXT) are written in the SAME transaction as the change with the acting session user as actor; a simulated audit-write failure rolls back the customer insert AND the sequence increment (test-verified).
+- Two PRD section 9 questions were resolved by the applied schema rather than invented: customers are separate company-scoped records (V2 `company_id NOT NULL` + composite FKs), and the code format follows the V3/V5 numbering convention. Validation mirrors the V2 column bounds (display name required ≤255, phone ≤50, email ≤320 with a sanity check, address ≤500, notes ≤10,000 as an engineering bound on TEXT, status ∈ {ACTIVE, INACTIVE}).
+- Test-database note: customer tests clean up with `TRUNCATE ... RESTART IDENTITY CASCADE` (the only legal path around the V2 no-delete trigger; CASCADE is required because V2/V3 composite FKs reference `customers`). Number-sequence counters and append-only audit rows are intentionally never reset, so all test assertions on them are relative.
+
 ## 7. Phase 5 — Invoice and debt management
 
 ### Tasks

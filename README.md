@@ -2,11 +2,11 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V6) and Spring Boot backend are implemented and tested locally. The authentication and company-access foundation plus user & company-membership management APIs are implemented (see below). Customers, invoices, payments, reporting and the frontend are NOT implemented yet.
+**Status:** Database foundation (Flyway V1–V6) and Spring Boot backend are implemented and tested locally. The authentication and company-access foundation, user & company-membership management APIs and company-scoped customer management are implemented (see below). Invoices, payments, reporting and the frontend are NOT implemented yet.
 
-## Current phase: authentication, company access & user management (implemented)
+## Current phase: authentication, company access, user & customer management (implemented)
 
-What is implemented and covered by automated tests (72 tests against the real `cpdts_test` database):
+What is implemented and covered by automated tests (85 tests against the real `cpdts_test` database):
 
 - **Session-based authentication (provisional decision):** login/logout via `POST/GET /api/v1/auth/*`; server-side HTTP sessions with BCrypt (cost 10) password hashes. JWT is NOT used; the token strategy in `docs/TECHNICAL_REQUIREMENTS.md` section 14 remains an open decision and sessions are the reversible default until that is approved.
 - **UTF-8 password limit:** passwords are limited to 12–72 UTF-8 **bytes** (bcrypt's hard limit is byte-based). Over-long input is rejected up front — never silently truncated.
@@ -22,13 +22,19 @@ What is implemented and covered by automated tests (72 tests against the real `c
   - Rules: platform admins manage both companies; company admins only their own (cross-company → 403, unknown company → 403 fail-closed). `PLATFORM_ADMIN` role cannot be assigned (403) and `is_platform_admin` is not writable through any API. Duplicate membership → 409; membership outside the addressed company → 404. Audit events: `USER_CREATED`, `MEMBERSHIP_CREATED`, `MEMBERSHIP_ROLE_CHANGED`, `MEMBERSHIP_STATUS_CHANGED` with the acting session user as actor.
 - **Consistent email identity:** login, the bootstrap and user creation all normalize emails through one shared helper (trimmed, lowercased with `Locale.ROOT`), so the same address always resolves to a single account regardless of typing case. Live data in both databases was verified collision-free before this rule was enforced — no migration or account rewrite was needed.
 - **Stable HTTP error contract:** unsupported methods on known endpoints return 405 with an `Allow` header and a JSON body (previously 500); authentication and CSRF checks still run before method routing, and non-numeric path variables return 400.
+- **Company-scoped customer management APIs** (PRD FR-03; reads require `RECORD_VIEW`, mutations require `CUSTOMER_MANAGE`, all permission-checked per target company, CSRF-protected, audit-logged in the same transaction):
+  - `GET /api/v1/companies/{companyId}/customers` — bounded pagination (`page` ≥ 0, 1 ≤ `size` ≤ 100, default 20) with optional `status` filter and `q` search over display name / customer code / email / phone; user input is ILIKE-escaped so `%`/`_`/`\` match literally; everything scoped to the authorized company.
+  - `POST /api/v1/companies/{companyId}/customers` — creates an ACTIVE customer with a **server-generated code** (`JMX-CUST-00001` style, from the company's `number_sequences` row of kind `CUSTOMER`, locked and incremented inside the creation transaction so concurrent creates get distinct contiguous numbers). A client-supplied code or company is never read.
+  - `GET /api/v1/companies/{companyId}/customers/{customerId}` — detail; a customer of another company is indistinguishable from a nonexistent one (404, no disclosure).
+  - `PATCH /api/v1/companies/{companyId}/customers/{customerId}` — update fields and/or `status` (activate/deactivate); null means unchanged, empty string clears a nullable field; only provided fields are changed, and the audit event carries the diff of the changed fields only.
+  - Rules: customers are **never deleted** (no DELETE endpoint; a database trigger also blocks it) — deactivation is a status change. Customer codes follow the approved `JMX-INV-00001` numbering convention with a `CUST` segment, derived from migrations V3/V5. Customers are separate company-scoped records (migration V2: `company_id NOT NULL`), so the same party in both companies is two rows. Audit events: `CUSTOMER_CREATED` and `CUSTOMER_UPDATED` with the acting session user as actor.
 
 What is NOT implemented yet (future approved phases):
 
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Payment-service layer enforcement of recorder ≠ verifier** — the database trigger already blocks it; the service-level check arrives with the payments phase.
-- Customers, invoices, payments, reporting, frontend.
+- Invoices, payments, reporting, frontend.
 
 ## Creating the first platform administrator
 
