@@ -3,9 +3,13 @@
   CPDTS backend - minimal Spring Boot foundation with Flyway migrations.
 
   Scope for this phase:
-    * Minimal Spring Boot application that starts, connects to PostgreSQL,
-      runs/validates the Flyway migrations, and exposes GET /actuator/health.
-    * NO authentication, NO business APIs, NO frontend.
+    * Spring Boot application that starts, connects to PostgreSQL and
+      runs/validates the Flyway migrations.
+    * Authentication foundation: session-based login (/api/v1/auth/*),
+      BCrypt password hashing, active-user/membership/permission checks,
+      one-time platform-admin bootstrap command, role/permission seed (V6).
+    * Health check: GET /actuator/health.
+    * NO customers/invoices/payments APIs and NO frontend.
 
   Migrations live in: backend/src/main/resources/db/migration (V1__*.sql, ...)
   and are applied identically by BOTH:
@@ -70,6 +74,24 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- Session-based authentication (Spring Security 7 via the Boot BOM). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <!-- Test support: JUnit 6, Mockito, AssertJ, spring-test. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- MockMvc security support (csrf(), springSecurity() configurer).
+             Version comes from spring-security-bom imported by the Boot BOM. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
         </dependency>
         <!-- Spring Boot 4 modular layout: Flyway auto-configuration lives here
              (starter-jdbc does NOT include it). -->

@@ -98,6 +98,21 @@ ERD and migrations match; all schema tests pass; changes are committed.
 ### Exit criteria
 Authorization tests pass before financial modules are opened to users.
 
+### Status note (2026-10-28 — authentication foundation delivered)
+
+Implemented and covered by automated tests:
+- Task 1 (sign-in + hashing): session-based login/logout, BCrypt (cost 10), passwords limited to 12–72 UTF-8 bytes (bcrypt's byte limit, no silent truncation), session-ID rotation on login, session invalidation on logout, deactivation ends live sessions.
+- Task 2 (data model): users/roles/permissions/memberships from migration V1; role/permission catalogue and matrix seeded by V6 (7 permissions, 5 roles); one role per company membership enforced by the database. *Management APIs for users/memberships are NOT part of this foundation and do not exist yet.*
+- Task 3 (trusted company context): `AccessControlService` resolves permissions per request from active memberships in active companies; unknown users/companies fail closed.
+- Task 4 (authorization checks): the permission-checking infrastructure is in place and tested; it applies to the authentication endpoints themselves today. Business endpoints that must call it arrive in Phases 4–8.
+- Task 5 (platform-admin rules): `users.is_platform_admin` grants every permission in both companies without memberships; the flag is written only by the one-time bootstrap and cannot be obtained through any API.
+- Task 7 (secure bootstrap): one-time `PlatformAdminBootstrap` command; password read only via a no-echo console (refuses otherwise unless explicitly overridden); schema-version guard; advisory lock; second-admin refusal; admin record and `PLATFORM_ADMIN_BOOTSTRAPPED` audit event committed atomically in one transaction.
+
+Remaining for later phases:
+- Task 2 remainder: user and membership management APIs (the `USER_MANAGE` permission is seeded and waiting).
+- Task 6: audit events for membership/permission changes (to be added together with those management APIs).
+- Task 4 remainder: recorder ≠ verifier service-layer check in the payments phase (already database-enforced by trigger `tg_payment_verifications_verifier` since V3).
+
 ## 6. Phase 4 — Customer management
 
 ### Tasks
