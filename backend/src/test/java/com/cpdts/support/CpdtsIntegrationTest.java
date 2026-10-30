@@ -138,11 +138,10 @@ public abstract class CpdtsIntegrationTest {
      * payments reference it), and PostgreSQL refuses to truncate a referenced
      * table alone. The cascade reaches exactly the tenant financial tables
      * (invoices, invoice_items, payments, payment_allocations,
-     * payment_verifications), which hold no rows while those phases are not
-     * built yet; once they do, those phases must clear their own tables in
-     * their own helpers and this comment must be revisited. The number
-     * sequence counters are NOT truncated (no FK) and tests assert them
-     * relatively. Real databases are never truncated: the application
+     * payment_verifications), so this helper doubles as the full
+     * financial-state reset for the invoice phase's tests as well. The
+     * number sequence counters are NOT truncated (no FK) and tests assert
+     * them relatively. Real databases are never truncated: the application
      * exposes no delete at all.
      */
     protected void clearTestCustomers() {

@@ -62,10 +62,14 @@ BEGIN
        OR NOT EXISTS (SELECT 1 FROM companies WHERE code = 'KAM') THEN
         RAISE EXCEPTION 'TEST FAILED: JMX and/or KAM codes missing';
     END IF;
-    IF EXISTS (SELECT 1 FROM users) THEN
-        RAISE EXCEPTION 'TEST FAILED: migrations must never seed users, but users table is not empty';
+    IF EXISTS (SELECT 1 FROM users WHERE email NOT LIKE '%@example.test') THEN
+        RAISE EXCEPTION 'TEST FAILED: migrations must never seed users, but users outside the reserved test domain exist';
     END IF;
-    RAISE NOTICE 'T01 PASS: JMX + KAM present, users table empty';
+    -- Rows inside the reserved @example.test domain belong to the integration
+    -- test suite (data-ownership rule), not to migrations. Audit actors among
+    -- them are immortal by design: the append-only audit_logs references them,
+    -- so they persist in this scratch database across runs.
+    RAISE NOTICE 'T01 PASS: JMX + KAM present, no migration-seeded users';
 END $$;
 
 \echo 'T02: payment amounts must be positive'

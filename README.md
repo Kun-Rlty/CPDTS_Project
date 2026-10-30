@@ -2,11 +2,11 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V6) and Spring Boot backend are implemented and tested locally. The authentication and company-access foundation, user & company-membership management APIs and company-scoped customer management are implemented (see below). Invoices, payments, reporting and the frontend are NOT implemented yet.
+**Status:** Database foundation (Flyway V1–V7) and Spring Boot backend are implemented and tested locally. The authentication and company-access foundation, user & company-membership management APIs, company-scoped customer management and company-scoped invoice management are implemented (see below). Payments, reporting and the frontend are NOT implemented yet.
 
-## Current phase: authentication, company access, user & customer management (implemented)
+## Current phase: authentication, company access, user, customer & invoice management (implemented)
 
-What is implemented and covered by automated tests (85 tests against the real `cpdts_test` database):
+What is implemented and covered by automated tests (105 tests against the real `cpdts_test` database):
 
 - **Session-based authentication (provisional decision):** login/logout via `POST/GET /api/v1/auth/*`; server-side HTTP sessions with BCrypt (cost 10) password hashes. JWT is NOT used; the token strategy in `docs/TECHNICAL_REQUIREMENTS.md` section 14 remains an open decision and sessions are the reversible default until that is approved.
 - **UTF-8 password limit:** passwords are limited to 12–72 UTF-8 **bytes** (bcrypt's hard limit is byte-based). Over-long input is rejected up front — never silently truncated.
@@ -28,13 +28,22 @@ What is implemented and covered by automated tests (85 tests against the real `c
   - `GET /api/v1/companies/{companyId}/customers/{customerId}` — detail; a customer of another company is indistinguishable from a nonexistent one (404, no disclosure).
   - `PATCH /api/v1/companies/{companyId}/customers/{customerId}` — update fields and/or `status` (activate/deactivate); null means unchanged, empty string clears a nullable field; only provided fields are changed, and the audit event carries the diff of the changed fields only.
   - Rules: customers are **never deleted** (no DELETE endpoint; a database trigger also blocks it) — deactivation is a status change. Customer codes follow the approved `JMX-INV-00001` numbering convention with a `CUST` segment, derived from migrations V3/V5. Customers are separate company-scoped records (migration V2: `company_id NOT NULL`), so the same party in both companies is two rows. Audit events: `CUSTOMER_CREATED` and `CUSTOMER_UPDATED` with the acting session user as actor.
+- **Company-scoped invoice management APIs** (PRD FR-04; reads require `RECORD_VIEW`, mutations require `INVOICE_MANAGE`, all permission-checked per target company, CSRF-protected, audit-logged in the same transaction):
+  - `GET /api/v1/companies/{companyId}/invoices` — bounded pagination (`page` ≥ 0, 1 ≤ `size` ≤ 100, default 20) with optional `status` and `customerId` filters and `q` search over invoice number / description (ILIKE-escaped so `%`/`_`/`\` match literally), always scoped to the authorized company. Rows include the **derived** balance state: `outstandingAmount` (stored server-calculated total minus ACTIVE allocations of VERIFIED payments; zero unless the invoice is ISSUED) and `derivedStatus` (`DRAFT`/`ISSUED`/`VOIDED` are stored; `UNPAID`/`PARTIALLY_PAID`/`PAID`/`OVERDUE` are derived on read and never stored).
+  - `POST /api/v1/companies/{companyId}/invoices` — creates a DRAFT for an **active customer of the same company** (foreign customer → 404, inactive → 409) with a **server-generated invoice number** (`JMX-INV-00001` style, from the company's `number_sequences` row of kind `INVOICE`, locked and incremented inside the creation transaction) and a **server-calculated total** (BigDecimal: each quantity × unit-price line rounded to 2 decimals HALF_UP — deliberately identical to the database's generated `line_total` column — then summed; currency is always TZS). Client-supplied numbers, totals, currency and status are never read.
+  - `GET /api/v1/companies/{companyId}/invoices/{invoiceId}` — detail with line items; an invoice of another company is indistinguishable from a nonexistent one (404, no disclosure).
+  - `PATCH .../{invoiceId}` — edits a **DRAFT only** (dates, description and/or items; a provided item list replaces the whole set and the total is recomputed). ISSUED and VOIDED invoices are immutable financial records (409). Edit, issue and void all lock the invoice row `FOR UPDATE` and re-check the lifecycle status after acquiring the lock, so edit/issue/void races serialize into exactly one winner.
+  - `POST .../{invoiceId}/issue` — DRAFT → ISSUED; requires a positive total and re-checks that the customer is still active (drafts of since-deactivated customers simply stay drafts).
+  - `POST .../{invoiceId}/void` — DRAFT/ISSUED → VOIDED with a **mandatory reason**; refused (409) while ACTIVE payment allocations exist — the row lock taken here is the coordination contract the future allocation phase must share, and migration V7 adds a database trigger as the backstop. VOIDED is terminal and excluded from collectible debt.
+  - Rules: invoices are **never deleted** (no DELETE endpoint; the V2 database trigger also blocks it) — corrections are voids. Invoices of since-deactivated customers remain fully accessible (list, detail, draft edits where applicable, void). Historical invoice access is never lost. Audit events: `INVOICE_CREATED`, `INVOICE_UPDATED` (changed-fields diff), `INVOICE_ISSUED`, `INVOICE_VOIDED` (reason recorded) with the acting session user as actor; a simulated audit-write failure rolls back the whole mutation including the sequence increment (no number is ever burned).
+- **Migration V7:** database-level backstop (`fn_check_allocation_invoice_issued` trigger) ensuring payment allocations can only ever target ISSUED invoices — tested on `cpdts_test` before being applied to `cpdts_dev`, in the V3 trigger style. The `PlatformAdminBootstrapper` schema-version guard was bumped to 7 accordingly (fail-closed by design).
 
 What is NOT implemented yet (future approved phases):
 
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Payment-service layer enforcement of recorder ≠ verifier** — the database trigger already blocks it; the service-level check arrives with the payments phase.
-- Invoices, payments, reporting, frontend.
+- Payments, reporting, frontend (the invoice backend of Phase 5 is done; its frontend screens belong to the frontend phase).
 
 ## Creating the first platform administrator
 

@@ -178,6 +178,18 @@ Tasks 1–4 are implemented and covered by automated tests (13 new tests; 85 tot
 ### Exit criteria
 Invoice lifecycle and totals are correct and tested.
 
+### Status note (2026-10-30 — invoice management backend delivered)
+
+Tasks 1–5 are implemented and covered by automated tests (20 new tests; 105 total against the real `cpdts_test` database):
+- Lifecycle exactly as approved in the phase instruction: `DRAFT` (editable; may be issued or voided) → `ISSUED` (financial fields and items immutable) → `VOIDED` (terminal, mandatory reason, excluded from collectible debt). There is no hard delete anywhere: no DELETE endpoint exists and the V2 no-delete trigger remains. `PAID` / `PARTIALLY_PAID` / `OVERDUE` / `UNPAID` are DERIVED on read (stored server-calculated total minus ACTIVE allocations of VERIFIED payments; only ISSUED invoices carry outstanding debt) and are never stored.
+- `GET|POST /api/v1/companies/{companyId}/invoices`, `GET|PATCH .../{invoiceId}`, `POST .../{invoiceId}/issue`, `POST .../{invoiceId}/void` — `RECORD_VIEW` for reads, `INVOICE_MANAGE` for mutations, resolved per request by `AccessControlService`; every lookup and write is company-scoped (foreign invoice/customer → 404, unknown company → 403 fail-closed, client-supplied id/number/total/currency/status/company never read).
+- Creation requires an ACTIVE customer of the same company and issuance re-checks that requirement; invoices of since-deactivated customers stay fully accessible (list, detail, draft edits where applicable, void).
+- Invoice numbers come from the company's `number_sequences` row (kind `INVOICE`), locked and incremented inside the creation transaction (`JMX-INV-00001` style; concurrent creations get distinct contiguous numbers — test-verified). Totals are BigDecimal with per-line HALF_UP rounding to 2 decimals before summing, proven equal to the V2 generated `line_total` column including fixtures where HALF_UP differs from banker's rounding (0.125 → 0.13). Currency is always TZS; issuing requires a positive total; validation mirrors the V2 column bounds and adds date-range/order checks and a 1–1000 item bound.
+- Edit/issue/void lock the invoice row `FOR UPDATE` and re-check the lifecycle status after acquiring the lock; concurrent issue attempts elect exactly one winner (test-verified). Void rejects invoices carrying ACTIVE allocations (409); the future allocation phase must take the same row lock and re-check `status = 'ISSUED'`, and migration V7 (`fn_check_allocation_invoice_issued` trigger in the V3 style) is the database-level backstop — tested on `cpdts_test` first, then applied to `cpdts_dev`.
+- Audit events `INVOICE_CREATED`, `INVOICE_UPDATED` (changed-fields diff; item lists excluded as unbounded), `INVOICE_ISSUED` and `INVOICE_VOIDED` (reason in `audit_logs.reason`) are written in the SAME transaction with the acting session user as actor; simulated audit-write failures roll back the invoice insert, ALL line items AND the sequence increment (no number is burned), and roll back an already-applied void status update — both test-verified.
+- Bounded company-scoped pagination (1 ≤ size ≤ 100, default 20) with `status`/`customerId` filters and ILIKE-escaped `q` search over invoice number/description.
+- The `PlatformAdminBootstrapper.EXPECTED_SCHEMA_VERSION` guard was bumped 6 → 7 with this migration (the guard fails closed on purpose).
+
 ## 8. Phase 6 — Payment recording and verification
 
 ### Tasks
