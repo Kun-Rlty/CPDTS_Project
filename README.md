@@ -2,9 +2,9 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard and customer management.
+**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer and invoice management.
 
-## Current phase: customer management frontend
+## Current phase: invoice management frontend
 
 What is implemented and covered by automated tests (136 tests against the real `cpdts_test` database):
 
@@ -66,7 +66,7 @@ What is NOT implemented yet (future approved phases):
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Refund processing, automatic allocation and a standalone allocation-reversal API** — deliberately out of scope: unallocated verified funds are customer credit, and only whole-payment reversal exists.
-- Invoice, payment, administration and report-list frontend screens.
+- Payment, administration and report-list frontend screens.
 
 ## Running the frontend locally
 
@@ -100,6 +100,8 @@ Open the URL printed by Vite (normally <http://localhost:5173>). Vite proxies `/
 The dashboard uses current company balances and a date-filtered received-payment list (up to ten rows, with the total count); it does not claim historical balances or aggregate a partial payment page. Dates are Tanzania business dates. Amounts are parsed without binary floating-point conversion. The authentication response now includes server-resolved permissions per company; backend permission checks remain authoritative. Frontend tests mock API responses and are not live browser integration tests.
 
 Customers can be searched and filtered by status with server-side pagination; details require `RECORD_VIEW`, while create, edit, activation and deactivation require `CUSTOMER_MANAGE`. The server assigns customer codes and company ownership. Changes use session CSRF protection and are not automatically retried. Switching companies or navigating away from edited forms prompts before discarding unsaved changes; a browser unload warning is also registered for dirty forms. There is no customer deletion.
+
+Invoices provide company-scoped search, lifecycle and customer ID filters, pagination and details for `RECORD_VIEW`. `INVOICE_MANAGE` permits draft creation/editing, issuance and voiding with a required reason. Active customers are selected from the current company's paginated customer API. Item previews use integer arithmetic with per-line HALF_UP rounding; the backend remains authoritative. Date-only inputs remain dates, not UTC instants. For issued invoices, settled is derived exactly from the server total minus outstanding; it is not inferred for draft or voided invoices. Pending mutations are not automatically retried, and unsaved changes trigger a warning on navigation or company switch.
 
 ## Creating the first platform administrator
 

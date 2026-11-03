@@ -182,6 +182,8 @@ Invoice lifecycle and totals are correct and tested.
 
 ### Status note (2026-10-30 — invoice management backend delivered)
 
+Invoice frontend: company-scoped list/details and draft/issue/void actions use the existing API and permissions. The current company's active customer list supplies new invoices. Decimal previews round each item HALF_UP using integer arithmetic; server totals remain authoritative. Date-only fields are preserved without timezone conversion. Frontend tests mock API responses; they are not live browser integration tests.
+
 Tasks 1–5 are implemented and covered by automated tests (20 new tests; 105 total against the real `cpdts_test` database):
 - Lifecycle exactly as approved in the phase instruction: `DRAFT` (editable; may be issued or voided) → `ISSUED` (financial fields and items immutable) → `VOIDED` (terminal, mandatory reason, excluded from collectible debt). There is no hard delete anywhere: no DELETE endpoint exists and the V2 no-delete trigger remains. `PAID` / `PARTIALLY_PAID` / `OVERDUE` / `UNPAID` are DERIVED on read (stored server-calculated total minus ACTIVE allocations of VERIFIED payments; only ISSUED invoices carry outstanding debt) and are never stored.
 - `GET|POST /api/v1/companies/{companyId}/invoices`, `GET|PATCH .../{invoiceId}`, `POST .../{invoiceId}/issue`, `POST .../{invoiceId}/void` — `RECORD_VIEW` for reads, `INVOICE_MANAGE` for mutations, resolved per request by `AccessControlService`; every lookup and write is company-scoped (foreign invoice/customer → 404, unknown company → 403 fail-closed, client-supplied id/number/total/currency/status/company never read).
