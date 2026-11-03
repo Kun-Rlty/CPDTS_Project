@@ -7,6 +7,9 @@ export type Session = { user: { id: string; email: string; fullName: string; pla
 export type Dashboard = { basis: { businessDate: string; zone: string }; outstandingAmount: string; overdueAmount: string; outstandingInvoiceCount: string; overdueInvoiceCount: string; pendingPaymentCount: string; pendingPaymentAmount: string; unallocatedCustomerCredit: string; verifiedPaymentAmount: string }
 export type Payment = { id: string; paymentNumber: string; customerName: string; amount: string; status: string; method: string; receivedAt: string }
 export type PaymentPage = { items: Payment[]; totalElements: string; totalPages: string }
+export type Customer = { id: string; customerCode: string | null; displayName: string; phone: string | null; email: string | null; address: string | null; notes: string | null; status: 'ACTIVE' | 'INACTIVE' }
+export type CustomerFields = { displayName: string; phone: string; email: string; address: string; notes: string }
+export type CustomerPage = { items: Customer[]; page: string; size: string; totalElements: string; totalPages: string }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
@@ -37,6 +40,17 @@ export const api = {
   payments: (id: string, from: string, to: string, signal: AbortSignal) => {
     const query = new URLSearchParams({ from, to, size: '10' })
     return request<PaymentPage>(`/companies/${encodeURIComponent(id)}/reports/payments?${query}`, { signal })
+  },
+  customers: (id: string, query: { page: number; q: string; status: string }, signal: AbortSignal) => {
+    const params = new URLSearchParams({ page: String(query.page), size: '20', q: query.q, status: query.status })
+    return request<CustomerPage>(`/companies/${encodeURIComponent(id)}/customers?${params}`, { signal })
+  },
+  customer: (company: string, id: string, signal: AbortSignal) => request<Customer>(`/companies/${encodeURIComponent(company)}/customers/${encodeURIComponent(id)}`, { signal }),
+  saveCustomer: async (company: string, id: string | null, body: CustomerFields | { status: string }) => {
+    const token = await csrf()
+    return request<Customer>(`/companies/${encodeURIComponent(company)}/customers${id ? '/' + encodeURIComponent(id) : ''}`, {
+      method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token }, body: JSON.stringify(body),
+    })
   },
 }
 

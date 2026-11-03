@@ -150,6 +150,8 @@ Customer workflow works end-to-end for both companies without data leakage.
 
 ### Status note (2026-10-29 — customer management backend delivered)
 
+Customer frontend phase: company-scoped search, status filters, pagination and details use the existing API. Users with `CUSTOMER_MANAGE` can create, edit, activate and deactivate customers; `RECORD_VIEW` gates reads. Forms warn before discarding edits, and company-scoped state is reset on company switch. Frontend component tests use mocked responses rather than a live backend.
+
 Tasks 1–4 are implemented and covered by automated tests (13 new tests; 85 total against the real `cpdts_test` database). Task 5 (frontend) remains:
 - `GET /api/v1/companies/{companyId}/customers` — bounded pagination (`page` ≥ 0, 1 ≤ `size` ≤ 100, default 20) plus optional `status` filter and `q` search over display name / customer code / email / phone, ILIKE-escaped (`%`, `_`, `\` match literally) and always scoped to the authorized company.
 - `POST /api/v1/companies/{companyId}/customers` — server-generated customer code (`JMX-CUST-00001` style, derived from the approved `JMX-INV-00001` convention in V3/V5 with a `CUST` segment); the counter row (`number_sequences`, kind `CUSTOMER`) is locked and incremented inside the creation transaction, so concurrent creates receive distinct contiguous numbers and a company's counter is never touched by the other company. Client-supplied code/company/id fields are never read.

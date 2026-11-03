@@ -20,6 +20,15 @@ describe('API client', () => {
     await api.logout()
     expect(fetcher.mock.calls[1][1]).toMatchObject({ method: 'POST', headers: { 'X-XSRF-TOKEN': 'fresh' } })
   })
+  it('sends customer mutations once with the session CSRF token', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response('{"token":"fresh"}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"id":12}', { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+    await api.saveCustomer('1', '12', { status: 'INACTIVE' })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher.mock.calls[1][0]).toBe('/api/v1/companies/1/customers/12')
+    expect(fetcher.mock.calls[1][1]).toMatchObject({ method: 'PATCH', credentials: 'same-origin', headers: { 'X-XSRF-TOKEN': 'fresh' } })
+  })
   it('formats exact large decimal values without floating point', () => {
     expect(formatMoney('999999999999999999.12')).toBe('TZS 999,999,999,999,999,999.12')
   })

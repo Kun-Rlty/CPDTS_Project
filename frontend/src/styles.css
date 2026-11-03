@@ -31,7 +31,9 @@ p { line-height: 1.5; }
 .sidebar { background: var(--dark); color: #fff; min-height: 100vh; padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 1.6rem; }
 .sidebar .brand { white-space: nowrap; overflow: hidden; }
 .nav-toggle { background: transparent; border-color: #829092; text-align: left; width: fit-content; }
-.sidebar nav a { color: white; text-decoration: none; display: flex; align-items: center; gap: .85rem; padding: .9rem; border-radius: 7px; font-weight: 650; background: var(--primary); white-space: nowrap; }
+.sidebar nav a { color: white; text-decoration: none; display: flex; align-items: center; gap: .85rem; padding: .9rem; border-radius: 7px; font-weight: 650; white-space: nowrap; }
+.sidebar nav a.active { background: var(--primary); }
+.sidebar nav a:not(.active):hover { background: #3b4c4e; }
 .sidebar nav a span { font-size: 1.3rem; line-height: 1; }
 .sidebar-footer { border-top: 1px solid #738284; margin-top: auto; padding-top: 1rem; color: #d6dede; font-size: .78rem; }
 .workspace { min-width: 0; }
@@ -72,6 +74,19 @@ th { background: #f2f6fa; color: #465b69; }
 .status.verified { background: #dcf4e6; color: #155d35; }
 .status.pending_verification { background: #ffebcf; color: #714000; }
 .status.rejected, .status.reversed { background: #fde7e7; color: #922121; }
+.customer-panel { margin-bottom: 1rem; }
+.customer-form { display: grid; gap: .9rem; max-width: 38rem; }
+.customer-form label, .customer-filters label { display: grid; gap: .35rem; min-width: 0; }
+.customer-form input, .customer-form textarea, .customer-filters input, .customer-filters select { width: 100%; min-width: 0; }
+.customer-form textarea { font: inherit; border: 1px solid #a9bac7; border-radius: 7px; padding: .65rem .75rem; resize: vertical; }
+.customer-filters, .actions, .pagination { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.customer-filters { margin-bottom: 1rem; }
+.customer-filters label:first-child { flex: 1 1 15rem; }
+.customer-details { display: grid; grid-template-columns: minmax(5rem, 10rem) minmax(0, 1fr); gap: .55rem; }
+.customer-details dt { font-weight: 650; }
+.customer-details dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pagination { justify-content: space-between; align-items: center; margin-top: 1rem; }
+.success { color: #155d35; }
 @media (max-width: 900px) { .app-shell, .app-shell.collapsed { display: block; } .sidebar { min-height: 0; padding: .7rem 1rem; display: flex; flex-flow: row wrap; align-items: center; gap: .8rem; } .sidebar .brand-mark { height: 32px; } .sidebar .brand { font-size: 1.3rem; flex: 1; } .sidebar nav { flex: 0 0 100%; } .sidebar-footer { display: none; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .topbar { padding: .8rem 1rem; } .content { padding: 1.4rem; } }
 @media (max-width: 650px) { .topbar { align-items: stretch; flex-direction: column; } .company-select { flex: none; width: 100%; } .company-select select { max-width: none; } .account { width: 100%; justify-content: space-between; } .heading { flex-wrap: wrap; } .metrics { gap: .7rem; } .metric { padding: .8rem; } .content { padding: 1rem; } .date-form label, .date-form input { min-width: 0; max-width: 100%; } }
 @media (max-width: 420px) { .metrics { grid-template-columns: minmax(0, 1fr); } }

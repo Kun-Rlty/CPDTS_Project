@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import App from './App'
 import { api, ApiError, type Dashboard, type Session } from './api'
 
@@ -9,7 +9,7 @@ const session: Session = { user: { id: '1', email: 'x@example.test', fullName: '
 const dashboard: Dashboard = { basis: { businessDate: '2026-05-10', zone: 'Africa/Dar_es_Salaam' }, outstandingAmount: '100.00', overdueAmount: '20.00', outstandingInvoiceCount: '1', overdueInvoiceCount: '1', pendingPaymentCount: '0', pendingPaymentAmount: '0', unallocatedCustomerCredit: '5', verifiedPaymentAmount: '5' }
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(api.me).mockResolvedValue(session); vi.mocked(api.dashboard).mockResolvedValue(dashboard); vi.mocked(api.payments).mockResolvedValue({ items: [], totalElements: '0', totalPages: '0' }) })
 afterEach(cleanup)
-function start(path = '/') { return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>) }
+function start(path = '/') { return render(<RouterProvider router={createMemoryRouter([{ path: '*', element: <App /> }], { initialEntries: [path] })} />) }
 
 describe('session and dashboard', () => {
   it('protects routes and signs in', async () => {
@@ -53,6 +53,7 @@ describe('session and dashboard', () => {
     vi.mocked(api.dashboard).mockImplementation(() => new Promise((_, fail) => { reject = fail }))
     start()
     expect(await screen.findByText('Loading current balances…')).toBeInTheDocument()
+    await waitFor(() => expect(reject).toBeDefined())
     reject(new ApiError(403, 'forbidden'))
     expect(await screen.findByText('You do not have access to this dashboard.')).toBeInTheDocument()
   })
