@@ -214,7 +214,7 @@ Payment lifecycle is correct before allocations are enabled.
 
 Tasks 1–5 and 7 are implemented and covered by automated tests (task 6 — evidence handling — is deliberately untouched until its storage/retention policy is approved; no gateway, evidence upload or invented API exists). Tests: 16 endpoint + 4 transaction = 20 of the 27 new payment tests; 132 total against the real `cpdts_test` database.
 - `POST|GET /api/v1/companies/{companyId}/payments`, `GET .../{paymentId}`, `POST .../{paymentId}/verify`, `POST .../{paymentId}/reject` — `RECORD_VIEW` for reads, `PAYMENT_RECORD` for recording, `PAYMENT_VERIFY` for decisions, resolved per request by `AccessControlService`; every lookup is company-scoped (foreign payment → 404 with no disclosure, unknown company → 403 fail-closed, client-supplied number/status/currency/recorder/allocated amounts never read).
-- Methods CASH / BANK_TRANSFER / MOBILE_MONEY; amounts must be positive with at most 2 decimals inside `NUMERIC(14,2)` (extra precision is REJECTED, never rounded); `receivedAt` accepts `yyyy-MM-dd` (stored at UTC start-of-day — the business-timezone policy remains an OPEN decision) or an ISO-8601 timestamp, years 2000–2100; reference ≤100, notes ≤1000, reasons ≤10,000.
+- Methods CASH / BANK_TRANSFER / MOBILE_MONEY; amounts must be positive with at most 2 decimals inside `NUMERIC(14,2)` (extra precision is REJECTED, never rounded); `receivedAt` accepts `yyyy-MM-dd` (start of day in Africa/Dar_es_Salaam) or an ISO-8601 instant, years 2000–2100; reference ≤100, notes ≤1000, reasons ≤10,000. Historical timestamps are not rewritten.
 - Recording does NOT require an ACTIVE customer (documented decision: collecting from a since-deactivated customer stays legal); duplicate references are permitted (V3 index non-unique — the duplicate-reference POLICY remains OPEN).
 - Decisions are atomic: only `PENDING_VERIFICATION` may receive a decision (otherwise 409), rejection reason is mandatory, and status + `payment_verifications` history + audit event commit in ONE transaction. **The recorder can never decide their own payment — including platform admins** (service check first; the V3 trigger `tg_payment_verifications_verifier` is the database backstop and is asserted directly by a test).
 - `VERIFIED` and `REJECTED` are terminal; no PUT/PATCH/DELETE route exists on any payment path (asserted, including `Allow` headers).
@@ -253,6 +253,8 @@ Tasks 1–5 are implemented and covered by automated tests (task 6 — report qu
 - Transaction tests prove the audit event is in the SAME transaction as the change for allocation and reversal too (a simulated audit-write failure rolls back allocation rows + key row — the SAME key then succeeds — and rolls back allocation reversals + payment status).
 
 ## 10. Phase 8 — Dashboard, reports, and exports
+
+Reporting backend: company-scoped dashboard, customer debt, outstanding invoices and payment register require `REPORT_VIEW`. The README documents filters and metric date bases. Debt and verified credit are separate current balances, not historical as-of balances; payment date filters describe received-at activity and do not reconstruct historical statuses. Read-only repeatable-read transactions keep page counts and rows consistent. Business dates use Africa/Dar_es_Salaam. Duplicate references remain permitted and idempotency cannot detect independently entered duplicates with different keys. Exports remain deferred.
 
 ### Tasks
 1. Implement dashboard summaries.

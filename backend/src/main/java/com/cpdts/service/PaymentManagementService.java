@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -135,14 +136,17 @@ public class PaymentManagementService {
     private final AccessControlService accessControlService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    /** Business clock: its zone (Africa/Dar_es_Salaam) defines business dates. */
+    private final Clock clock;
 
     public PaymentManagementService(JdbcTemplate jdbc,
             AccessControlService accessControlService, ObjectMapper objectMapper,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager, Clock clock) {
         this.jdbc = jdbc;
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.clock = clock;
     }
 
     // ------------------------------------------------------------------
@@ -532,14 +536,14 @@ public class PaymentManagementService {
      * is the INVOICE-side rule (correlated on {@code i}) and stays the single
      * authority for invoice outstanding balances.
      */
-    private static final String PAYMENT_ALLOCATED_SUM_SQL = """
+    static final String PAYMENT_ALLOCATED_SUM_SQL = """
             (SELECT COALESCE(SUM(a.amount), 0)
              FROM payment_allocations a
              WHERE a.payment_id = p.id
                AND a.company_id = p.company_id
                AND a.status = 'ACTIVE')""";
 
-    private static final String PAYMENT_SELECT = """
+    static final String PAYMENT_SELECT = """
             SELECT p.id, p.payment_number, p.customer_id, p.amount, p.currency_code, p.method,
                    p.reference_number, p.received_at, p.recorded_at, p.status, p.recorded_by,
                    p.notes, p.reversed_at, p.reversed_by, p.reversal_reason,
@@ -647,7 +651,7 @@ public class PaymentManagementService {
         return new PaymentDetailDto(payment, verifications, allocations);
     }
 
-    private static PaymentDto mapPayment(java.sql.ResultSet rs) throws java.sql.SQLException {
+    static PaymentDto mapPayment(java.sql.ResultSet rs) throws java.sql.SQLException {
         String status = rs.getString("status");
         BigDecimal amount = rs.getBigDecimal("amount");
         BigDecimal allocated = rs.getBigDecimal("allocated_amount");
@@ -858,11 +862,16 @@ public class PaymentManagementService {
     }
 
     /**
-     * ISO date (yyyy-MM-dd) or full ISO-8601 timestamp. Date-only input is
-     * stored at UTC start-of-day; the business-timezone policy remains open
-     * (documented) and this choice is deterministic across machines.
+     * ISO date (yyyy-MM-dd) or full ISO-8601 timestamp.
+     *
+     * <p>Date-only input is stored at the START of that date in the BUSINESS
+     * timezone (the injected clock's zone: Africa/Dar_es_Salaam, UTC+3) -
+     * never UTC, so "2026-05-10" means 2026-05-10T00:00+03:00 =
+     * 2026-05-09T21:00:00Z. A full timestamp is an exact instant and is
+     * stored unchanged (historical instants are never rewritten); only its
+     * year guard is evaluated on the business date.
      */
-    private static Instant requireReceivedAt(String raw) {
+    private Instant requireReceivedAt(String raw) {
         String normalized = raw == null ? "" : raw.trim();
         if (normalized.isEmpty()) {
             throw new IllegalArgumentException("received date is required");
@@ -875,10 +884,10 @@ public class PaymentManagementService {
                     throw new IllegalArgumentException(
                             "received date must be between " + MIN_YEAR + " and " + MAX_YEAR);
                 }
-                return date.atStartOfDay().toInstant(java.time.ZoneOffset.UTC);
+                return date.atStartOfDay(clock.getZone()).toInstant();
             }
             Instant instant = Instant.parse(normalized);
-            date = java.time.LocalDateTime.ofInstant(instant, java.time.ZoneOffset.UTC)
+            date = java.time.LocalDateTime.ofInstant(instant, clock.getZone())
                     .toLocalDate();
             if (date.getYear() < MIN_YEAR || date.getYear() > MAX_YEAR) {
                 throw new IllegalArgumentException(

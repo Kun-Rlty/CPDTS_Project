@@ -150,10 +150,9 @@ class PaymentManagementEndpointTest extends CpdtsIntegrationTest {
         assertThat(((Number) row.get("recorded_by")).longValue())
                 .as("the recorder is derived from the session actor, never the body")
                 .isEqualTo(officer);
-        // Date-only input is stored at UTC start-of-day (documented choice;
-        // the business-timezone policy is still open):
+        // Date-only input is stored at the start of the Tanzania business date.
         assertThat(row.get("received_at"))
-                .isEqualTo(Timestamp.from(Instant.parse("2026-05-10T00:00:00Z")));
+                .isEqualTo(Timestamp.from(Instant.parse("2026-05-09T21:00:00Z")));
 
         // Numbering is company-scoped and advances exactly once (run-relative
         // because counters persist across runs in the scratch test database):

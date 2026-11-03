@@ -2,6 +2,7 @@ package com.cpdts.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -120,12 +121,20 @@ public class InvoiceManagementService {
     private final JdbcTemplate jdbc;
     private final AccessControlService accessControlService;
     private final ObjectMapper objectMapper;
+    /** Business clock: its zone (Africa/Dar_es_Salaam) defines "today". */
+    private final Clock clock;
 
     public InvoiceManagementService(JdbcTemplate jdbc,
-            AccessControlService accessControlService, ObjectMapper objectMapper) {
+            AccessControlService accessControlService, ObjectMapper objectMapper, Clock clock) {
         this.jdbc = jdbc;
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
+        this.clock = clock;
+    }
+
+    /** Current BUSINESS date (clock zone), never the JVM default zone. */
+    LocalDate businessDate() {
+        return LocalDate.now(clock);
     }
 
     // ------------------------------------------------------------------
@@ -185,6 +194,7 @@ public class InvoiceManagementService {
 
         Long total = jdbc.queryForObject("SELECT count(*) FROM invoices i " + where,
                 Long.class, args.toArray());
+        LocalDate businessDate = businessDate();
         List<InvoiceSummaryDto> items = jdbc.query(
                 """
                 SELECT i.id, i.invoice_number, i.customer_id, i.issue_date, i.due_date,
@@ -198,7 +208,7 @@ public class InvoiceManagementService {
                 ORDER BY i.issue_date DESC, i.id DESC
                 LIMIT ? OFFSET ?
                 """.formatted(ALLOCATED_SUM_SQL, where),
-                (rs, rowNum) -> mapSummary(rs),
+                (rs, rowNum) -> mapSummary(rs, businessDate),
                 concat(args, pageSize, (long) pageNumber * pageSize).toArray());
 
         long totalElements = total == null ? 0 : total;
@@ -664,6 +674,7 @@ public class InvoiceManagementService {
 
     private java.util.Optional<InvoiceSummaryDto> findSummaryInCompany(long companyId,
             long invoiceId) {
+        LocalDate businessDate = businessDate();
         return jdbc.query(
                 """
                 SELECT i.id, i.invoice_number, i.customer_id, i.issue_date, i.due_date,
@@ -675,7 +686,8 @@ public class InvoiceManagementService {
                 JOIN customers c ON c.id = i.customer_id AND c.company_id = i.company_id
                 WHERE i.company_id = ? AND i.id = ?
                 """.formatted(ALLOCATED_SUM_SQL),
-                (rs, rowNum) -> mapSummary(rs), companyId, invoiceId).stream().findFirst();
+                (rs, rowNum) -> mapSummary(rs, businessDate), companyId, invoiceId)
+                .stream().findFirst();
     }
 
     private java.util.Optional<InvoiceDetailDto> findDetailInCompany(long companyId,
@@ -696,7 +708,13 @@ public class InvoiceManagementService {
         return withItems(companyId, invoiceId, invoice);
     }
 
-    private static InvoiceSummaryDto mapSummary(java.sql.ResultSet rs)
+    /**
+     * Row mapper shared with {@link ReportingService}: the report rows must
+     * derive outstanding/derived status with EXACTLY the invoice-read rule
+     * (only ISSUED carries debt, floored at zero, overdue vs the business
+     * date passed in).
+     */
+    static InvoiceSummaryDto mapSummary(java.sql.ResultSet rs, LocalDate businessDate)
             throws java.sql.SQLException {
         String status = rs.getString("status");
         BigDecimal totalAmount = rs.getBigDecimal("total_amount");
@@ -706,7 +724,7 @@ public class InvoiceManagementService {
                 ? totalAmount.subtract(allocated).max(BigDecimal.ZERO)
                 : BigDecimal.ZERO.setScale(2, RoundingMode.UNNECESSARY);
         String derivedStatus = deriveStatus(status, outstanding, allocated,
-                rs.getDate("due_date").toLocalDate());
+                rs.getDate("due_date").toLocalDate(), businessDate);
         return new InvoiceSummaryDto(
                 rs.getLong("id"),
                 rs.getString("invoice_number"),
@@ -734,16 +752,22 @@ public class InvoiceManagementService {
      * lifecycle status, then PAID, OVERDUE, PARTIALLY_PAID, UNPAID. Overdue
      * outranks partially paid (PRD FR-08: any positive balance past its due
      * date is overdue).
+     *
+     * <p>{@code businessDate} is the CURRENT date in the business timezone
+     * (Africa/Dar_es_Salaam) - a due date is overdue only when it is
+     * STRICTLY before that date, so an invoice due today is not yet overdue.
+     * The caller supplies it from the injected clock so every read (invoice
+     * API and reports) uses one consistent boundary.
      */
     static String deriveStatus(String status, BigDecimal outstanding,
-            BigDecimal allocated, LocalDate dueDate) {
+            BigDecimal allocated, LocalDate dueDate, LocalDate businessDate) {
         if (!STATUS_ISSUED.equals(status)) {
             return status;
         }
         if (outstanding.signum() <= 0) {
             return "PAID";
         }
-        if (dueDate.isBefore(LocalDate.now())) {
+        if (dueDate.isBefore(businessDate)) {
             return "OVERDUE";
         }
         return allocated.signum() > 0 ? "PARTIALLY_PAID" : "UNPAID";
