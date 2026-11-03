@@ -24,10 +24,16 @@ import com.cpdts.support.CpdtsIntegrationTest;
  */
 class AccessControlServiceTest extends CpdtsIntegrationTest {
 
-    private static final Set<String> ALL_SEVEN = Set.of(
+    /**
+     * Every permission for the two admin roles. Seven codes were approved in
+     * V6; V8 added PAYMENT_REVERSE (admin-only whole-payment reversal), so
+     * the admins - and only the admins - hold all EIGHT. The matrix test
+     * below asserts the database matches this set exactly.
+     */
+    private static final Set<String> ALL_EIGHT = Set.of(
             Permissions.USER_MANAGE, Permissions.CUSTOMER_MANAGE, Permissions.INVOICE_MANAGE,
-            Permissions.PAYMENT_RECORD, Permissions.PAYMENT_VERIFY, Permissions.RECORD_VIEW,
-            Permissions.REPORT_VIEW);
+            Permissions.PAYMENT_RECORD, Permissions.PAYMENT_VERIFY, Permissions.PAYMENT_REVERSE,
+            Permissions.RECORD_VIEW, Permissions.REPORT_VIEW);
 
     @AfterEach
     void cleanUpTestUsers() {
@@ -37,8 +43,8 @@ class AccessControlServiceTest extends CpdtsIntegrationTest {
     @Test
     void seededPermissionMatrixMatchesTheApprovedRolesExactly() {
         Map<String, Set<String>> expected = new LinkedHashMap<>();
-        expected.put("PLATFORM_ADMIN", ALL_SEVEN);
-        expected.put("COMPANY_ADMIN", ALL_SEVEN);
+        expected.put("PLATFORM_ADMIN", ALL_EIGHT);
+        expected.put("COMPANY_ADMIN", ALL_EIGHT);
         expected.put("FINANCE_OFFICER",
                 Set.of(Permissions.CUSTOMER_MANAGE, Permissions.INVOICE_MANAGE,
                         Permissions.PAYMENT_RECORD, Permissions.RECORD_VIEW,
@@ -48,7 +54,8 @@ class AccessControlServiceTest extends CpdtsIntegrationTest {
                         Permissions.REPORT_VIEW));
         expected.put("VIEWER", Set.of(Permissions.RECORD_VIEW, Permissions.REPORT_VIEW));
 
-        // The permission catalogue is exactly the seven approved codes.
+        // The permission catalogue is exactly the approved codes (V6's seven
+        // plus V8's admin-only PAYMENT_REVERSE).
         assertThat(jdbc.queryForList("SELECT code FROM permissions", String.class))
                 .containsExactlyInAnyOrderElementsOf(Permissions.ALL);
 
@@ -76,9 +83,9 @@ class AccessControlServiceTest extends CpdtsIntegrationTest {
                 true);
 
         assertThat(accessControlService.permissionsFor(userId, companyId("JMX")))
-                .isEqualTo(ALL_SEVEN);
+                .isEqualTo(ALL_EIGHT);
         assertThat(accessControlService.permissionsFor(userId, companyId("KAM")))
-                .isEqualTo(ALL_SEVEN);
+                .isEqualTo(ALL_EIGHT);
         assertThat(accessControlService.companiesFor(userId))
                 .extracting(CompanyAccess::code).containsExactly("JMX", "KAM");
         assertThat(jdbc.queryForObject(
@@ -203,7 +210,7 @@ class AccessControlServiceTest extends CpdtsIntegrationTest {
 
         assertThat(accessControlService.permissionsFor(userId, companyId("JMX")))
                 .as("the role grants its permissions inside JMX")
-                .isEqualTo(ALL_SEVEN);
+                .isEqualTo(ALL_EIGHT);
         assertThat(accessControlService.permissionsFor(userId, companyId("KAM")))
                 .as("the same role membership must grant NOTHING in KAM")
                 .isEmpty();
@@ -223,7 +230,7 @@ class AccessControlServiceTest extends CpdtsIntegrationTest {
         addMembership(userId, "JMX", "COMPANY_ADMIN", "ACTIVE");
 
         assertThat(accessControlService.permissionsFor(userId, companyId("JMX")))
-                .isEqualTo(ALL_SEVEN);
+                .isEqualTo(ALL_EIGHT);
         assertThat(accessControlService.permissionsFor(userId, companyId("KAM")))
                 .as("company admins get nothing in the other company").isEmpty();
         assertThat(accessControlService.companiesFor(userId))
@@ -238,7 +245,7 @@ class AccessControlServiceTest extends CpdtsIntegrationTest {
         long userId = insertUser(uniqueEmail("flag-revoke"), "flag revoke password 1", "ACTIVE",
                 true);
         assertThat(accessControlService.permissionsFor(userId, companyId("KAM")))
-                .isEqualTo(ALL_SEVEN);
+                .isEqualTo(ALL_EIGHT);
 
         jdbc.update("UPDATE users SET is_platform_admin = FALSE, updated_at = now() "
                 + "WHERE id = ?", userId);

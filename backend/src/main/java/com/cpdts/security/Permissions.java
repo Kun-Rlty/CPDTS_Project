@@ -16,6 +16,8 @@ public final class Permissions {
     public static final String INVOICE_MANAGE = "INVOICE_MANAGE";
     public static final String PAYMENT_RECORD = "PAYMENT_RECORD";
     public static final String PAYMENT_VERIFY = "PAYMENT_VERIFY";
+    /** Admin-only: whole-payment reversal (V8; granted to admin roles only). */
+    public static final String PAYMENT_REVERSE = "PAYMENT_REVERSE";
     public static final String RECORD_VIEW = "RECORD_VIEW";
     public static final String REPORT_VIEW = "REPORT_VIEW";
 
@@ -26,6 +28,7 @@ public final class Permissions {
             INVOICE_MANAGE,
             PAYMENT_RECORD,
             PAYMENT_VERIFY,
+            PAYMENT_REVERSE,
             RECORD_VIEW,
             REPORT_VIEW);
 

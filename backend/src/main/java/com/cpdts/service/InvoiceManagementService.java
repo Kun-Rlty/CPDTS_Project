@@ -492,9 +492,11 @@ public class InvoiceManagementService {
      * Sum of ACTIVE allocations of VERIFIED, non-reversed payments against
      * the invoice. A reversed payment has status REVERSED (never VERIFIED),
      * so the status filter alone excludes it - matching the V3 design note
-     * that balance derivation stays in the backend.
+     * that balance derivation stays in the backend. Package-private: the
+     * payment-management service reuses it for allocation validation so
+     * both sides of a transfer compute balances with ONE rule.
      */
-    private static final String ALLOCATED_SUM_SQL = """
+    static final String ALLOCATED_SUM_SQL = """
             (SELECT COALESCE(SUM(a.amount), 0)
              FROM payment_allocations a
              JOIN payments p ON p.id = a.payment_id AND p.company_id = a.company_id

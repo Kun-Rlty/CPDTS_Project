@@ -129,7 +129,7 @@ Intentionally OUT of scope for these APIs (approved decision — global user dat
 - No global user directory (listing is company-scoped only); no global user status change, profile edit or password change/reset for EXISTING users; no account recovery. Adding an existing user to a second company requires the platform administrator.
 
 Remaining for later phases:
-- Task 4 remainder: recorder ≠ verifier service-layer check in the payments phase (already database-enforced by trigger `tg_payment_verifications_verifier` since V3).
+- ~~Task 4 remainder: recorder ≠ verifier service-layer check in the payments phase~~ — delivered with the payment-management phase (2026-11-03): the service rejects it before the V3 trigger backstop, for every actor including platform admins.
 
 ## 6. Phase 4 — Customer management
 
@@ -210,6 +210,17 @@ Tasks 1–5 are implemented and covered by automated tests (20 new tests; 105 to
 ### Exit criteria
 Payment lifecycle is correct before allocations are enabled.
 
+### Status note (2026-11-03 — payment recording and verification backend delivered)
+
+Tasks 1–5 and 7 are implemented and covered by automated tests (task 6 — evidence handling — is deliberately untouched until its storage/retention policy is approved; no gateway, evidence upload or invented API exists). Tests: 16 endpoint + 4 transaction = 20 of the 27 new payment tests; 132 total against the real `cpdts_test` database.
+- `POST|GET /api/v1/companies/{companyId}/payments`, `GET .../{paymentId}`, `POST .../{paymentId}/verify`, `POST .../{paymentId}/reject` — `RECORD_VIEW` for reads, `PAYMENT_RECORD` for recording, `PAYMENT_VERIFY` for decisions, resolved per request by `AccessControlService`; every lookup is company-scoped (foreign payment → 404 with no disclosure, unknown company → 403 fail-closed, client-supplied number/status/currency/recorder/allocated amounts never read).
+- Methods CASH / BANK_TRANSFER / MOBILE_MONEY; amounts must be positive with at most 2 decimals inside `NUMERIC(14,2)` (extra precision is REJECTED, never rounded); `receivedAt` accepts `yyyy-MM-dd` (stored at UTC start-of-day — the business-timezone policy remains an OPEN decision) or an ISO-8601 timestamp, years 2000–2100; reference ≤100, notes ≤1000, reasons ≤10,000.
+- Recording does NOT require an ACTIVE customer (documented decision: collecting from a since-deactivated customer stays legal); duplicate references are permitted (V3 index non-unique — the duplicate-reference POLICY remains OPEN).
+- Decisions are atomic: only `PENDING_VERIFICATION` may receive a decision (otherwise 409), rejection reason is mandatory, and status + `payment_verifications` history + audit event commit in ONE transaction. **The recorder can never decide their own payment — including platform admins** (service check first; the V3 trigger `tg_payment_verifications_verifier` is the database backstop and is asserted directly by a test).
+- `VERIFIED` and `REJECTED` are terminal; no PUT/PATCH/DELETE route exists on any payment path (asserted, including `Allow` headers).
+- Payment numbers come from the company's `number_sequences` row (kind `PAYMENT`), locked and incremented inside the creation transaction (`JMX-PAY-00001` style; concurrent creations get distinct contiguous numbers — test-verified). Audit events `PAYMENT_RECORDED`, `PAYMENT_VERIFIED`, `PAYMENT_REJECTED` are written with the session actor in the SAME transaction; a simulated audit-write failure rolls back the payment insert AND the sequence increment (no number burned) and rolls back an already-executed status/history change — test-verified.
+- **Idempotency contract:** the `Idempotency-Key` header is REQUIRED on `POST /payments` (1–64 chars of `[A-Za-z0-9._-]`); the key row is written in the SAME transaction as the payment, so a retry replays the original entity with 200, the same key with a different canonical payload (SHA-256 over money-normalized/trimmed/uppercased input) is 409, and a failed attempt leaves no key row (the same key still works afterwards).
+
 ## 9. Phase 7 — Allocations, balances, and reversals
 
 ### Tasks
@@ -229,6 +240,17 @@ Payment lifecycle is correct before allocations are enabled.
 
 ### Exit criteria
 Core financial invariants pass integration tests against PostgreSQL.
+
+### Status note (2026-11-03 — allocation, balances and whole-payment reversal backend delivered)
+
+Tasks 1–5 are implemented and covered by automated tests (task 6 — report queries — belongs to the reporting phase). Tests: 16 endpoint + 4 transaction + 7 concurrency = 27 new payment tests; 132 total against the real `cpdts_test` database.
+- `POST .../{paymentId}/allocations` (`PAYMENT_RECORD`, `Idempotency-Key` REQUIRED — replay 200 / key reuse with different input 409) and `POST .../{paymentId}/reverse` (`PAYMENT_REVERSE`, admin only, mandatory reason). There is **no** standalone allocation-reversal API, **no** automatic allocation and **no** refund processing — unallocated VERIFIED funds are simply the customer's `availableCredit`.
+- Allocation preconditions, re-checked inside the transaction: payment `VERIFIED`, invoice `ISSUED`, same customer AND company (foreign/unknown invoice → 404, never a composite-FK 500; wrong invoice state → 409). Partial and multi-invoice are supported (1–100 lines, each invoice at most once per request); an allocation can never exceed the payment's available credit nor the invoice's outstanding balance. Pending/rejected/reversed payments contribute nothing to either side.
+- Whole-payment reversal is limited to `PLATFORM_ADMIN` / `COMPANY_ADMIN`. Because V6 also grants `PAYMENT_VERIFY` to `PAYMENT_VERIFIER`, that rule cannot reuse `PAYMENT_VERIFY` and the architecture authorizes by permission, never by role name — so **migration V8 adds the eighth permission `PAYMENT_REVERSE`, granted only to those two admin roles** (platform admins additionally hold it through `Permissions.ALL`, and `AccessControlServiceTest` asserts the Java set matches the database catalogue exactly). Reversal flips the payment and ALL of its ACTIVE allocations to `REVERSED` in ONE transaction, restores the invoice balances, and preserves payment, decision history, allocation rows and audit trail (no deletes, no financial-field edits).
+- **Documented row-lock ordering:** the payment row is locked `FOR UPDATE` FIRST, then invoice rows in ascending-id order; the invoice void locks only the invoice; no operation locks an invoice before the payment; every status/total/credit/outstanding value is re-checked AFTER acquiring the locks.
+- Migration V8 also adds the `idempotency_keys` table (`UNIQUE (company_id, scope, idempotency_key)` + SHA-256 `request_hash`). Tested on `cpdts_test` first, then applied to `cpdts_dev`; `PlatformAdminBootstrapper.EXPECTED_SCHEMA_VERSION` was bumped 7 → 8 (fail-closed by design) and Flyway validates 8 migrations on both databases.
+- Concurrency tests prove: same-key creations elect exactly one payment with exactly one non-replay (losers roll back their sequence increment); distinct keys yield contiguous payment numbers; verify-vs-reject elects exactly one decision; **two payments can never overpay one invoice** and **one payment can never be over-allocated** (losers get 400s and roll back completely); reversal-vs-allocation and void-vs-allocation each end in exactly one consistent state with no ACTIVE allocation surviving a reversal and no allocation surviving a void.
+- Transaction tests prove the audit event is in the SAME transaction as the change for allocation and reversal too (a simulated audit-write failure rolls back allocation rows + key row — the SAME key then succeeds — and rolls back allocation reversals + payment status).
 
 ## 10. Phase 8 — Dashboard, reports, and exports
 
