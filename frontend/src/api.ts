@@ -7,6 +7,10 @@ export type Session = { user: { id: string; email: string; fullName: string; pla
 export type Dashboard = { basis: { businessDate: string; zone: string }; outstandingAmount: string; overdueAmount: string; outstandingInvoiceCount: string; overdueInvoiceCount: string; pendingPaymentCount: string; pendingPaymentAmount: string; unallocatedCustomerCredit: string; verifiedPaymentAmount: string }
 export type Payment = { id: string; paymentNumber: string; customerName: string; amount: string; status: string; method: string; receivedAt: string }
 export type PaymentPage = { items: Payment[]; totalElements: string; totalPages: string }
+export type PaymentRecord = Payment & { customerId: string; customerCode: string | null; recordedBy: string; recordedByName: string | null; referenceNumber: string | null; notes: string | null; allocatedAmount: string; availableCredit: string; reversedAt: string | null; reversedBy: string | null; reversalReason: string | null }
+export type PaymentDetail = { payment: PaymentRecord; verifications: { id: string; decision: string; reason: string | null; verifierName: string | null; createdAt: string }[]; allocations: { id: string; invoiceId: string; invoiceNumber: string; amount: string; status: string; createdAt: string; reversedAt: string | null; reversalReason: string | null }[] }
+export type RecordPayment = { customerId: string; amount: string; method: string; receivedAt: string; referenceNumber: string; notes: string }
+export type AllocationLine = { invoiceId: string; amount: string }
 export type Customer = { id: string; customerCode: string | null; displayName: string; phone: string | null; email: string | null; address: string | null; notes: string | null; status: 'ACTIVE' | 'INACTIVE' }
 export type CustomerFields = { displayName: string; phone: string; email: string; address: string; notes: string }
 export type CustomerPage = { items: Customer[]; page: string; size: string; totalElements: string; totalPages: string }
@@ -71,6 +75,26 @@ export const api = {
   invoiceAction: async (company: string, id: string, action: 'issue' | 'void', reason?: string) => {
     const token = await csrf()
     return request<Invoice>(`/companies/${encodeURIComponent(company)}/invoices/${encodeURIComponent(id)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token }, ...(action === 'void' ? { body: JSON.stringify({ reason }) } : {}) })
+  },
+  paymentList: (company: string, query: { page: number; q: string; status: string; customerId: string }, signal: AbortSignal) => {
+    const params = new URLSearchParams({ page: String(query.page), size: '20', q: query.q, status: query.status })
+    if (query.customerId) params.set('customerId', query.customerId)
+    return request<PaymentPage>(`/companies/${encodeURIComponent(company)}/payments?${params}`, { signal })
+  },
+  paymentDetail: (company: string, id: string, signal: AbortSignal) => request<PaymentDetail>(`/companies/${encodeURIComponent(company)}/payments/${encodeURIComponent(id)}`, { signal }),
+  recordPayment: async (company: string, body: RecordPayment, key: string) => {
+    const token = await csrf()
+    const number = (value: string) => new LosslessNumber(value.trim().replace(/^0+(?=\d)/, ''))
+    return request<PaymentDetail>(`/companies/${encodeURIComponent(company)}/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token, 'Idempotency-Key': key }, body: stringify({ ...body, customerId: number(body.customerId), amount: number(body.amount) }) })
+  },
+  allocatePayment: async (company: string, id: string, lines: AllocationLine[], key: string) => {
+    const token = await csrf()
+    const number = (value: string) => new LosslessNumber(value.trim().replace(/^0+(?=\d)/, ''))
+    return request<PaymentDetail>(`/companies/${encodeURIComponent(company)}/payments/${encodeURIComponent(id)}/allocations`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token, 'Idempotency-Key': key }, body: stringify({ allocations: lines.map(line => ({ invoiceId: number(line.invoiceId), amount: number(line.amount) })) }) })
+  },
+  paymentAction: async (company: string, id: string, action: 'verify' | 'reject' | 'reverse', text: string) => {
+    const token = await csrf()
+    return request<PaymentDetail>(`/companies/${encodeURIComponent(company)}/payments/${encodeURIComponent(id)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token }, body: JSON.stringify(action === 'verify' ? { notes: text } : { reason: text }) })
   },
 }
 

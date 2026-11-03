@@ -196,6 +196,8 @@ Tasks 1–5 are implemented and covered by automated tests (20 new tests; 105 to
 
 ## 8. Phase 6 — Payment recording and verification
 
+Payment frontend: company-scoped list/details, recording, manual verification/rejection, explicit allocations and whole-payment reversal use the existing APIs and permissions. Create/allocation payloads and idempotency keys are retained in tab-scoped session storage for explicit retry after uncertain outcomes; closing the tab loses them. UI tests mock responses and do not replace live cross-user browser verification.
+
 ### Tasks
 1. Implement payment recording for cash, bank transfer, and mobile money.
 2. Validate amounts, method-specific fields, company, and references.
