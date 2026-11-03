@@ -25,7 +25,15 @@ The application is intended for desktop and laptop work first, while remaining u
 - Use one coherent icon set and consistent button styles.
 - Avoid making the interface look like a consumer shopping app.
 
-A final brand palette and logo treatment should be approved before detailed UI implementation. Do not invent or modify company logos without source assets/approval.
+### Approved brand palette
+
+- **Primary:** `#1f3a8f` — primary actions and active navigation.
+- **Accent:** `#f19325` — accents and visual highlights.
+- **Dark neutral:** `#273537` — sidebar and dark text.
+
+Use light page backgrounds and white cards. Centralize these colors in shared frontend theme tokens when the frontend is implemented. Maintain accessible contrast for text, controls, and focus indicators; choose a contrasting text color for each background rather than assuming white text is readable on the accent. Use distinct semantic status colors with text labels; color alone must not convey status.
+
+Logo treatment still requires approval. Do not invent or modify company logos without source assets/approval.
 
 ## 4. Information architecture
 

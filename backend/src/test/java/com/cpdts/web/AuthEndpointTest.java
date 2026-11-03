@@ -44,6 +44,8 @@ class AuthEndpointTest extends CpdtsIntegrationTest {
                 .andExpect(jsonPath("$.companies.length()").value(1))
                 .andExpect(jsonPath("$.companies[0].code").value("JMX"))
                 .andExpect(jsonPath("$.companies[0].role").value("FINANCE_OFFICER"))
+                .andExpect(jsonPath("$.companies[0].permissions").isArray())
+                .andExpect(jsonPath("$.companies[0].permissions[?(@ == 'REPORT_VIEW')]").isNotEmpty())
                 .andReturn();
 
         MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
@@ -57,7 +59,14 @@ class AuthEndpointTest extends CpdtsIntegrationTest {
                 .andExpect(jsonPath("$.user.id").value(userId));
         mockMvc.perform(get("/api/v1/auth/companies").session(session))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].code").value("JMX"));
+                .andExpect(jsonPath("$[0].code").value("JMX"))
+                .andExpect(jsonPath("$[0].permissions[?(@ == 'REPORT_VIEW')]").isNotEmpty());
+
+        // Permissions come from the current membership, not the login session.
+        jdbc.update("UPDATE company_memberships SET status = 'INACTIVE' WHERE user_id = ?", userId);
+        mockMvc.perform(get("/api/v1/auth/me").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies.length()").value(0));
 
         // last_login_at was recorded server-side.
         assertThat(jdbc.queryForObject(

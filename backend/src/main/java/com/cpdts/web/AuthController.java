@@ -91,7 +91,8 @@ public class AuthController {
     }
 
     /** role is the membership role code, or null for platform-wide access. */
-    public record CompanyDto(long id, String code, String displayName, String role) {
+    public record CompanyDto(long id, String code, String displayName, String role,
+            java.util.Set<String> permissions) {
     }
 
     public record AuthSessionResponse(UserDto user, List<CompanyDto> companies) {

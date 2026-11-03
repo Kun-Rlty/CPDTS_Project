@@ -256,6 +256,8 @@ Tasks 1–5 are implemented and covered by automated tests (task 6 — report qu
 
 Reporting backend: company-scoped dashboard, customer debt, outstanding invoices and payment register require `REPORT_VIEW`. The README documents filters and metric date bases. Debt and verified credit are separate current balances, not historical as-of balances; payment date filters describe received-at activity and do not reconstruct historical statuses. Read-only repeatable-read transactions keep page counts and rows consistent. Business dates use Africa/Dar_es_Salaam. Duplicate references remain permitted and idempotency cannot detect independently entered duplicates with different keys. Exports remain deferred.
 
+Frontend phase: React/TypeScript sign-in, session restoration, company selection and dashboard only. The auth company DTO exposes server-resolved permissions so the UI can avoid unauthorized report requests; backend checks remain authoritative. Current balances and date-filtered received-payment activity are distinct, and only the first ten activity rows are shown. Other business screens and exports remain deferred.
+
 ### Tasks
 1. Implement dashboard summaries.
 2. Implement customer statements and invoice/payment history.

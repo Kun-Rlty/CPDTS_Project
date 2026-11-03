@@ -152,7 +152,8 @@ public class AuthService {
 
     private List<CompanyDto> companyDtos(long userId) {
         return accessControlService.companiesFor(userId).stream()
-                .map(c -> new CompanyDto(c.companyId(), c.code(), c.displayName(), c.roleCode()))
+                .map(c -> new CompanyDto(c.companyId(), c.code(), c.displayName(), c.roleCode(),
+                        accessControlService.permissionsFor(userId, c.companyId())))
                 .toList();
     }
 }

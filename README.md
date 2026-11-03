@@ -2,9 +2,9 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend is not implemented yet.
+**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The first frontend phase provides sign-in, company selection and a dashboard.
 
-## Current phase: company dashboard and reporting backend
+## Current phase: frontend sign-in and dashboard
 
 What is implemented and covered by automated tests (136 tests against the real `cpdts_test` database):
 
@@ -66,7 +66,38 @@ What is NOT implemented yet (future approved phases):
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Refund processing, automatic allocation and a standalone allocation-reversal API** — deliberately out of scope: unallocated verified funds are customer credit, and only whole-payment reversal exists.
-- Frontend (including invoice, payment and report screens).
+- Customer, invoice, payment, administration and report-list frontend screens.
+
+## Running the frontend locally
+
+Requires Node.js 22 and a running PostgreSQL database and backend. From the repository root in PowerShell, load your existing local credentials without displaying them, then start the backend:
+
+```powershell
+$kv = @{}
+Get-Content .\.env.backend | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -and -not $line.StartsWith('#')) {
+        $p = $line -split '=', 2
+        if ($p.Count -eq 2) { $kv[$p[0].Trim()] = $p[1].Trim() }
+    }
+}
+$env:CPDTS_DB_URL = "jdbc:postgresql://$(if ($kv.DB_HOST) { $kv.DB_HOST } else { 'localhost' }):$(if ($kv.DB_PORT) { $kv.DB_PORT } else { '5432' })/$(if ($kv.DB_NAME) { $kv.DB_NAME } else { 'cpdts_dev' })"
+$env:CPDTS_DB_USER = $kv.DB_USER
+$env:CPDTS_DB_PASSWORD = $kv.DB_PASSWORD
+mvn -f backend\pom.xml spring-boot:run
+```
+
+In a second terminal, from the repository root:
+
+```powershell
+cd frontend
+npm ci --legacy-peer-deps
+npm run dev
+```
+
+Open the URL printed by Vite (normally <http://localhost:5173>). Vite proxies `/api` to `http://localhost:8080`, preserving the existing session-cookie and CSRF checks. Sign in with an existing authorized account; no default credentials are supplied. The `--legacy-peer-deps` flag works around an npm 10 peer-resolution failure observed with the selected test dependencies. For verification run `npm run typecheck`, `npm test`, and `npm run build` in `frontend/`.
+
+The dashboard uses current company balances and a date-filtered received-payment list (up to ten rows, with the total count); it does not claim historical balances or aggregate a partial payment page. Dates are Tanzania business dates. Amounts are parsed without binary floating-point conversion. The authentication response now includes server-resolved permissions per company; backend permission checks remain authoritative. Frontend tests mock API responses and are not live browser integration tests.
 
 ## Creating the first platform administrator
 
@@ -100,7 +131,7 @@ The command prompts for email, full name and password (twice) with no echo. The 
 
 ## Folder map
 - `docs/`: six project specification documents.
-- `frontend/`: reserved for React + TypeScript frontend.
+- `frontend/`: React + TypeScript frontend (Vite).
 - `backend/`: Spring Boot backend; Flyway migrations under `src/main/resources/db/migration` (V1–V8 applied).
 - `database/`: database-related notes/scripts after approval.
 - `tests/`: end-to-end and cross-module test assets.

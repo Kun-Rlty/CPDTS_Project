@@ -18,6 +18,7 @@ dist/
 build/
 .next/
 coverage/
+*.tsbuildinfo
 
 # IDE / OS
 .idea/
