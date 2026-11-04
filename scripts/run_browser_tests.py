@@ -64,6 +64,8 @@ def main():
     run_id = uuid.uuid4().hex
     env['CPDTS_E2E_A'] = f'browser-a-{run_id}@example.test'
     env['CPDTS_E2E_B'] = f'browser-b-{run_id}@example.test'
+    env['CPDTS_E2E_PLATFORM'] = f'browser-platform-{run_id}@example.test'
+    env['CPDTS_E2E_CREATED'] = f'browser-created-{run_id}@example.test'
     env['CPDTS_E2E_PASSWORD'] = secrets.token_urlsafe(24)
     hashed = bcrypt.hashpw(env['CPDTS_E2E_PASSWORD'].encode(), bcrypt.gensalt(rounds=10)).decode()
     psql = shutil.which('psql') or r'C:\Program Files\PostgreSQL\18\bin\psql.exe'
@@ -73,7 +75,8 @@ BEGIN;
 DO $$ BEGIN IF pg_catalog.current_database() <> 'cpdts_test' THEN RAISE EXCEPTION 'unsafe database'; END IF; END $$;
 INSERT INTO users(email,password_hash,full_name,status,is_platform_admin)
 VALUES ('{env['CPDTS_E2E_A']}','{hashed}','Browser Test A','ACTIVE',false),
-       ('{env['CPDTS_E2E_B']}','{hashed}','Browser Test B','ACTIVE',false);
+       ('{env['CPDTS_E2E_B']}','{hashed}','Browser Test B','ACTIVE',false),
+       ('{env['CPDTS_E2E_PLATFORM']}','{hashed}','Browser Test Platform','ACTIVE',true);
 INSERT INTO company_memberships(company_id,user_id,role_id,status)
 SELECT c.id,u.id,r.id,'ACTIVE' FROM companies c, users u, roles r
 WHERE (u.email='{env['CPDTS_E2E_A']}' AND c.code='JMX' AND r.code='FINANCE_OFFICER')
@@ -113,7 +116,8 @@ COMMIT;
         deactivate = f"""
 BEGIN;
 DO $$ BEGIN IF pg_catalog.current_database() <> 'cpdts_test' THEN RAISE EXCEPTION 'unsafe database'; END IF; END $$;
-UPDATE users SET status='DISABLED' WHERE email IN ('{env['CPDTS_E2E_A']}', '{env['CPDTS_E2E_B']}');
+UPDATE users SET status='DISABLED', is_platform_admin=false
+WHERE email IN ('{env['CPDTS_E2E_A']}', '{env['CPDTS_E2E_B']}', '{env['CPDTS_E2E_PLATFORM']}', '{env['CPDTS_E2E_CREATED']}');
 COMMIT;
 """
         subprocess.run([psql, '-h', 'localhost', '-p', '5432', '-U', config['DB_USER'], '-d', 'cpdts_test',

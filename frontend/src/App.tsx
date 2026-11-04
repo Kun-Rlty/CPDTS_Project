@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate, Route, Routes, useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError, formatMoney, type Company, type Dashboard, type PaymentPage, type Session } from './api'
 import Customers from './Customers'
 import Invoices from './Invoices'
 import Payments from './Payments'
+import UsersAccess from './UsersAccess'
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; data: T }
 
@@ -14,6 +15,11 @@ export default function App() {
   const [attempt, setAttempt] = useState(0)
   const [expired, setExpired] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const accessGeneration = useRef(0)
+  const sessionUser = useRef<string | undefined>(undefined)
+  const selectedCompany = useRef(selected)
+  sessionUser.current = session?.user.id
+  selectedCompany.current = selected
   const navigate = useNavigate()
   const location = useLocation()
   const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname)
@@ -40,20 +46,39 @@ export default function App() {
     return () => { active = false }
   }, [attempt])
 
-  const onExpired = () => { setDirty(false); setSelected(''); setSession(null); setExpired(true) }
+  const onExpired = () => { accessGeneration.current++; sessionUser.current = undefined; setDirty(false); setSelected(''); setSession(null); setExpired(true) }
+  const refreshAccess = async (expectedUserId: string, affectedCompany: string) => {
+    if (sessionUser.current !== expectedUserId) return
+    const generation = ++accessGeneration.current
+    const previous = selectedCompany.current
+    if (previous === affectedCompany) { setDirty(false); setSelected('') }
+    try {
+      const fresh = await api.me()
+      if (generation !== accessGeneration.current || sessionUser.current !== expectedUserId || fresh.user.id !== expectedUserId) return
+      setSession(fresh)
+      setSelected(current => fresh.companies.some(c => c.id === current) ? current : fresh.companies.some(c => c.id === previous) ? previous : fresh.companies.length === 1 ? fresh.companies[0].id : '')
+    } catch (e) {
+      if (generation !== accessGeneration.current) return
+      if (e instanceof ApiError && e.status === 401) onExpired()
+      else if (selectedCompany.current !== affectedCompany && selectedCompany.current !== '') {
+        setSession(current => current ? { ...current, companies: current.companies.filter(c => c.id !== affectedCompany) } : current)
+      } else setSessionError('Unable to refresh your access. Check your connection and try again.')
+    }
+  }
   if (sessionError) return <main className="center"><div className="panel"><p role="alert">{sessionError}</p><button onClick={() => setAttempt(n => n + 1)}>Try again</button></div></main>
   if (session === undefined) return <main className="center" role="status">Checking your session…</main>
   const company = session?.companies.find(c => c.id === selected)
   const discard = () => !dirty || window.confirm('Discard unsaved changes?')
   const go = (path: string) => { if (location.pathname !== path) navigate(path) }
-  const content = !session ? null : session.companies.length === 0 ? <section className="panel"><h2>No company access</h2><p>Your account has no active company access. Contact an administrator.</p></section> : !company ? <section className="panel"><h2>Select a company</h2><p>Choose an available company above to continue.</p></section> : location.pathname === '/payments' ? !company.permissions.includes('RECORD_VIEW') ? <section className="panel"><h2>Payment access unavailable</h2><p>You do not have permission to view payments for {company.displayName}.</p></section> : <Payments key={company.id} company={company} userId={session.user.id} onExpired={onExpired} setDirty={setDirty} /> : location.pathname === '/invoices' ? !company.permissions.includes('RECORD_VIEW') ? <section className="panel"><h2>Invoice access unavailable</h2><p>You do not have permission to view invoices for {company.displayName}.</p></section> : <Invoices key={company.id} company={company} onExpired={onExpired} setDirty={setDirty} /> : location.pathname === '/customers' ? !company.permissions.includes('RECORD_VIEW') ? <section className="panel"><h2>Customer access unavailable</h2><p>You do not have permission to view customers for {company.displayName}.</p></section> : <Customers key={company.id} company={company} onExpired={onExpired} setDirty={setDirty} /> : !company.permissions.includes('REPORT_VIEW') ? <section className="panel"><h2>Dashboard access unavailable</h2><p>You do not have permission to view reports for {company.displayName}.</p></section> : <CompanyDashboard key={company.id} company={company} onExpired={onExpired} />
-  const shell = session && <Shell session={session} selected={selected} select={id => { if (id !== selected && discard()) { setDirty(false); setSelected(id) } }} path={location.pathname} go={go} onLogout={async () => { if (!discard()) return; try { await api.logout(); setDirty(false); setSelected(''); setSession(null); navigate('/login', { replace: true }) } catch (e) { if (e instanceof ApiError && e.status === 401) onExpired(); else throw e } }}>{content}</Shell>
+  const content = !session ? null : session.companies.length === 0 ? <section className="panel"><h2>No company access</h2><p>Your account has no active company access. Contact an administrator.</p></section> : !company ? <section className="panel"><h2>Select a company</h2><p>Choose an available company above to continue.</p></section> : location.pathname === '/users' ? !company.permissions.includes('USER_MANAGE') ? <section className="panel"><h2>Users &amp; Access unavailable</h2><p>You do not have permission to manage users for {company.displayName}.</p></section> : <UsersAccess key={company.id} company={company} user={session.user} onExpired={onExpired} setDirty={setDirty} refreshAccess={refreshAccess} /> : location.pathname === '/payments' ? !company.permissions.includes('RECORD_VIEW') ? <section className="panel"><h2>Payment access unavailable</h2><p>You do not have permission to view payments for {company.displayName}.</p></section> : <Payments key={company.id} company={company} userId={session.user.id} onExpired={onExpired} setDirty={setDirty} /> : location.pathname === '/invoices' ? !company.permissions.includes('RECORD_VIEW') ? <section className="panel"><h2>Invoice access unavailable</h2><p>You do not have permission to view invoices for {company.displayName}.</p></section> : <Invoices key={company.id} company={company} onExpired={onExpired} setDirty={setDirty} /> : location.pathname === '/customers' ? !company.permissions.includes('RECORD_VIEW') ? <section className="panel"><h2>Customer access unavailable</h2><p>You do not have permission to view customers for {company.displayName}.</p></section> : <Customers key={company.id} company={company} onExpired={onExpired} setDirty={setDirty} /> : !company.permissions.includes('REPORT_VIEW') ? <section className="panel"><h2>Dashboard access unavailable</h2><p>You do not have permission to view reports for {company.displayName}.</p></section> : <CompanyDashboard key={company.id} company={company} onExpired={onExpired} />
+  const shell = session && <Shell session={session} selected={selected} select={id => { if (id !== selected && discard()) { setDirty(false); setSelected(id) } }} path={location.pathname} go={go} onLogout={async () => { if (!discard()) return; try { await api.logout(); accessGeneration.current++; sessionUser.current = undefined; setDirty(false); setSelected(''); setSession(null); navigate('/login', { replace: true }) } catch (e) { if (e instanceof ApiError && e.status === 401) onExpired(); else throw e } }}>{content}</Shell>
   return <Routes>
     <Route path="/login" element={session ? <Navigate to="/" replace /> : <Login expired={expired} onLogin={s => { setExpired(false); setSession(s); setSelected(s.companies.length === 1 ? s.companies[0].id : ''); navigate('/', { replace: true }) }} />} />
     <Route path="/" element={!session ? <Navigate to="/login" replace /> : shell} />
     <Route path="/customers" element={!session ? <Navigate to="/login" replace /> : shell} />
     <Route path="/invoices" element={!session ? <Navigate to="/login" replace /> : shell} />
     <Route path="/payments" element={!session ? <Navigate to="/login" replace /> : shell} />
+    <Route path="/users" element={!session ? <Navigate to="/login" replace /> : shell} />
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>
 }
@@ -75,7 +100,7 @@ function Login({ onLogin, expired }: { onLogin: (s: Session) => void; expired: b
 function Shell({ session, selected, select, path, go, onLogout, children }: { session: Session; selected: string; select: (id: string) => void; path: string; go: (path: string) => void; onLogout: () => Promise<void>; children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false), [error, setError] = useState('')
   const canViewCustomers = session.companies.find(c => c.id === selected)?.permissions.includes('RECORD_VIEW')
-  return <div className={'app-shell' + (collapsed ? ' collapsed' : '')}><aside className="sidebar"><div className="brand"><span className="brand-mark" />{!collapsed && <span>CPDTS<small>Payment &amp; Debt Tracking</small></span>}</div><button className="nav-toggle" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!collapsed}>☰</button><nav aria-label="Main navigation"><a className={path === '/' ? 'active' : ''} href="/" aria-label="Dashboard" aria-current={path === '/' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/') }}><span aria-hidden="true">⌂</span>{!collapsed && 'Dashboard'}</a>{canViewCustomers && <a className={path === '/customers' ? 'active' : ''} href="/customers" aria-label="Customers" aria-current={path === '/customers' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/customers') }}><span aria-hidden="true">♙</span>{!collapsed && 'Customers'}</a>}{canViewCustomers && <a className={path === '/invoices' ? 'active' : ''} href="/invoices" aria-label="Invoices" aria-current={path === '/invoices' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/invoices') }}><span aria-hidden="true">I</span>{!collapsed && 'Invoices'}</a>}{canViewCustomers && <a className={path === '/payments' ? 'active' : ''} href="/payments" aria-label="Payments" aria-current={path === '/payments' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/payments') }}><span aria-hidden="true">P</span>{!collapsed && 'Payments'}</a>}</nav><div className="sidebar-footer">{!collapsed && 'Financial operations'}</div></aside><div className="workspace"><header className="topbar"><div className="company-select">{session.companies.length > 1 ? <><label htmlFor="company">Company</label><select id="company" value={selected} onChange={e => select(e.target.value)}><option value="">Select a company</option>{session.companies.map(c => <option key={c.id} value={c.id}>{c.displayName} ({c.code})</option>)}</select></> : session.companies.length === 1 ? <span>{session.companies[0].displayName} ({session.companies[0].code})</span> : <span>No company selected</span>}</div><div className="account"><span>{session.user.fullName}</span><button className="secondary" onClick={() => { setError(''); onLogout().catch(() => setError('Unable to sign out. Please try again.')) }}>Sign out</button></div></header>{error && <p className="error" role="alert">{error}</p>}<main className="content">{children}</main></div></div>
+  return <div className={'app-shell' + (collapsed ? ' collapsed' : '')}><aside className="sidebar"><div className="brand"><span className="brand-mark" />{!collapsed && <span>CPDTS<small>Payment &amp; Debt Tracking</small></span>}</div><button className="nav-toggle" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!collapsed}>☰</button><nav aria-label="Main navigation"><a className={path === '/' ? 'active' : ''} href="/" aria-label="Dashboard" aria-current={path === '/' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/') }}><span aria-hidden="true">⌂</span>{!collapsed && 'Dashboard'}</a>{canViewCustomers && <a className={path === '/customers' ? 'active' : ''} href="/customers" aria-label="Customers" aria-current={path === '/customers' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/customers') }}><span aria-hidden="true">♙</span>{!collapsed && 'Customers'}</a>}{canViewCustomers && <a className={path === '/invoices' ? 'active' : ''} href="/invoices" aria-label="Invoices" aria-current={path === '/invoices' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/invoices') }}><span aria-hidden="true">I</span>{!collapsed && 'Invoices'}</a>}{canViewCustomers && <a className={path === '/payments' ? 'active' : ''} href="/payments" aria-label="Payments" aria-current={path === '/payments' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/payments') }}><span aria-hidden="true">P</span>{!collapsed && 'Payments'}</a>}{session.companies.find(c => c.id === selected)?.permissions.includes('USER_MANAGE') && <a className={path === '/users' ? 'active' : ''} href="/users" aria-label="Users &amp; Access" aria-current={path === '/users' ? 'page' : undefined} onClick={e => { e.preventDefault(); go('/users') }}><span aria-hidden="true">U</span>{!collapsed && 'Users & Access'}</a>}</nav><div className="sidebar-footer">{!collapsed && 'Financial operations'}</div></aside><div className="workspace"><header className="topbar"><div className="company-select">{session.companies.length > 1 ? <><label htmlFor="company">Company</label><select id="company" value={selected} onChange={e => select(e.target.value)}><option value="">Select a company</option>{session.companies.map(c => <option key={c.id} value={c.id}>{c.displayName} ({c.code})</option>)}</select></> : session.companies.length === 1 ? <span>{session.companies[0].displayName} ({session.companies[0].code})</span> : <span>No company selected</span>}</div><div className="account"><span>{session.user.fullName}</span><button className="secondary" onClick={() => { setError(''); onLogout().catch(() => setError('Unable to sign out. Please try again.')) }}>Sign out</button></div></header>{error && <p className="error" role="alert">{error}</p>}<main className="content">{children}</main></div></div>
 }
 
 function CompanyDashboard({ company, onExpired }: { company: Company; onExpired: () => void }) {

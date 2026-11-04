@@ -2,14 +2,14 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice and payment management.
+**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice, payment and company membership management.
 
-## Current phase: payment management frontend
+## Current phase: Users & Access frontend
 
 What is implemented and covered by automated tests (136 tests against the real `cpdts_test` database):
 
 - **Session-based authentication (provisional decision):** login/logout via `POST/GET /api/v1/auth/*`; server-side HTTP sessions with BCrypt (cost 10) password hashes. JWT is NOT used; the token strategy in `docs/TECHNICAL_REQUIREMENTS.md` section 14 remains an open decision and sessions are the reversible default until that is approved.
-- **UTF-8 password limit:** passwords are limited to 12–72 UTF-8 **bytes** (bcrypt's hard limit is byte-based). Over-long input is rejected up front — never silently truncated.
+- **Password limit:** passwords require at least 12 characters and at most 72 UTF-8 **bytes** (bcrypt's hard limit is byte-based). Over-long input is rejected up front — never silently truncated.
 - **Session hygiene:** login rotates the session ID of any pre-login session (session-fixation protection); logout invalidates the session; user deactivation ends live sessions on the next request.
 - **Permission matrix (migrations V6 + V8):** 8 permissions (`USER_MANAGE`, `CUSTOMER_MANAGE`, `INVOICE_MANAGE`, `PAYMENT_RECORD`, `PAYMENT_VERIFY`, `PAYMENT_REVERSE`, `RECORD_VIEW`, `REPORT_VIEW`) and 5 roles (`PLATFORM_ADMIN`, `COMPANY_ADMIN`, `FINANCE_OFFICER`, `PAYMENT_VERIFIER`, `VIEWER`). Authorization is permission-based (from `role_permissions`), not role-name-based. `PAYMENT_REVERSE` (V8) is granted **only** to `PLATFORM_ADMIN` and `COMPANY_ADMIN`, because whole-payment reversal is admin-only; platform admins additionally hold it through the code-level bypass set (`Permissions.ALL`, asserted to match the database catalogue exactly).
 - **Company access checks:** only ACTIVE memberships in ACTIVE companies grant permissions; users without a membership have no access to that company; the platform administrator (a `users.is_platform_admin` flag, set only by the one-time bootstrap) has every permission in both companies without memberships. Checks run server-side on every request (fresh from the database).
@@ -66,7 +66,7 @@ What is NOT implemented yet (future approved phases):
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Refund processing, automatic allocation and a standalone allocation-reversal API** — deliberately out of scope: unallocated verified funds are customer credit, and only whole-payment reversal exists.
-- Administration and report-list frontend screens.
+- Company settings, audit-log and report-list frontend screens.
 
 ## Running the frontend locally
 
@@ -105,6 +105,8 @@ Invoices provide company-scoped search, lifecycle and customer ID filters, pagin
 
 Payments use `RECORD_VIEW` for lists/details, `PAYMENT_RECORD` for recording and explicit allocations, `PAYMENT_VERIFY` for decisions by someone other than the recorder, and `PAYMENT_REVERSE` for whole-payment reversal. Received dates/times are Tanzania business dates/times. Payment creation and allocation retain their original payload and idempotency key in the current browser tab's `sessionStorage`, scoped by user, company and operation, until a successful response or explicit reconciliation. This allows a deliberate identical retry after an uncertain response, including when balances have since changed; no mutation is retried automatically. **These pending financial details remain in the tab until resolved or the tab is closed**; closing the tab loses recovery information. Check server-side payment and allocation history before clearing a retry key or entering a changed request. Backend authorization, verification separation, balances and concurrency checks remain authoritative.
 
+Users & Access requires `USER_MANAGE` in the selected company. It lists the existing API's unpaginated membership results, separately showing global account status and company-membership status. Managers can create users and change membership roles/status; only platform admins can attach an existing account. The UI offers the four seeded assignable roles, never `PLATFORM_ADMIN`, and has no global-profile, global-status or credential-edit controls. Password input is not stored in browser storage or persisted form state and is cleared on submission or form exit. After a change to one's own membership, the UI refreshes session permissions and fails closed while access is refreshed.
+
 Idempotency replays are also bound to the original actor on the backend: another user cannot replay that actor's key even if they have company permission and know the request. The original actor can still retry the identical request.
 
 ### Browser integration tests (local disposable database only)
@@ -120,11 +122,11 @@ python scripts\run_browser_tests.py
 
 The runner accepts no database/port overrides. It connects only to `localhost:5432/cpdts_test`, checks `current_database()` before fixture writes, and starts a test-only backend on port 18081 with Flyway disabled and an independent startup database guard. A separate Vite server on port 15173 proxies only to that backend; the runner refuses occupied ports and requires its private server marker before browser actions. The normal development servers on ports 8080/5173 are not used. Fixtures use random credentials and unique test-only users; those users are deactivated after the run. Financial and append-only audit records are retained: **the runner does not truncate, reset or delete database history**. Test server logs and Playwright output are local test artifacts and must not be committed.
 
-The guarded Playwright run completed two live browser tests: the desktop two-user create/issue/record/verify/allocate/retry/reverse flow (including cross-company isolation, logout and cross-user replay denial) and mobile customer, invoice and payment form interactions. These complement, rather than replace, the mocked frontend unit tests. For the non-destructive backend replay and guard regressions, after loading `CPDTS_DB_USER` and `CPDTS_DB_PASSWORD` as above, run:
+The guarded Playwright suite covers user role/status changes, platform-admin attachment, immediate self-access loss and company isolation, alongside the desktop two-user payment lifecycle and mobile form interactions. Fixtures include a platform administrator with a random, run-specific password; its account is disabled and platform flag removed during cleanup. These tests complement, rather than replace, mocked frontend unit tests. For the non-destructive backend user isolation, replay and guard regressions, after loading `CPDTS_DB_USER` and `CPDTS_DB_PASSWORD` as above, run:
 
 ```powershell
 $env:CPDTS_DB_URL = 'jdbc:postgresql://localhost:5432/cpdts_test'
-mvn -B -f backend\pom.xml '-Dtest=PaymentReplayActorTest,BrowserTestServerGuardTest,PasswordPolicyTest' test
+mvn -B -f backend\pom.xml '-Dtest=UserAccessIsolationTest,PaymentReplayActorTest,BrowserTestServerGuardTest,PasswordPolicyTest' test
 ```
 
 The ordinary backend integration suites that truncate scratch financial tables must not be run when preserving existing test data.

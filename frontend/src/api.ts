@@ -18,6 +18,8 @@ export type InvoiceItem = { description: string; quantity: string; unitPrice: st
 export type Invoice = { id: string; invoiceNumber: string; customerId: string; customerName: string; issueDate: string; dueDate: string; status: 'DRAFT' | 'ISSUED' | 'VOIDED'; derivedStatus: string; totalAmount: string; outstandingAmount: string; description: string | null; items?: InvoiceItem[] }
 export type InvoicePage = { items: Invoice[]; totalElements: string; totalPages: string }
 export type InvoiceFields = { issueDate: string; dueDate: string; description: string; items: InvoiceItem[]; customerId?: string }
+export type Member = { userId: string; email: string; fullName: string; userStatus: string; membershipStatus: string; role: string }
+export type CreateMember = { email: string; role: string; fullName?: string; password?: string }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
@@ -95,6 +97,15 @@ export const api = {
   paymentAction: async (company: string, id: string, action: 'verify' | 'reject' | 'reverse', text: string) => {
     const token = await csrf()
     return request<PaymentDetail>(`/companies/${encodeURIComponent(company)}/payments/${encodeURIComponent(id)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token }, body: JSON.stringify(action === 'verify' ? { notes: text } : { reason: text }) })
+  },
+  members: (company: string, signal: AbortSignal) => request<Member[]>(`/companies/${encodeURIComponent(company)}/users`, { signal }),
+  createMember: async (company: string, body: CreateMember) => {
+    const token = await csrf()
+    return request<Member>(`/companies/${encodeURIComponent(company)}/users`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token }, body: JSON.stringify(body) })
+  },
+  updateMembership: async (company: string, id: string, body: { role?: string; status?: string }) => {
+    const token = await csrf()
+    return request<Member>(`/companies/${encodeURIComponent(company)}/users/${encodeURIComponent(id)}/membership`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': token }, body: JSON.stringify(body) })
   },
 }
 

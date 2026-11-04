@@ -110,6 +110,8 @@ Implemented and covered by automated tests:
 
 ### Status note (2026-10-29 — user and membership management delivered)
 
+Users & Access frontend: `USER_MANAGE` gates company member listing, new-user creation, membership roles and activation; platform administrators alone are offered existing-account attachment. Account and membership status remain separate. Password input is transient and cleared on submission or exit. Self-membership changes refresh access immediately; other companies' state is discarded on switching. Guarded browser tests exercise role/status changes, self-access loss, platform attachment and cross-company denial without resetting test data.
+
 Task 2 remainder and Task 6 are implemented and covered by automated tests (23 new tests; 66 total against the real `cpdts_test` database):
 - `GET /api/v1/companies/{companyId}/users` — list a company's members (role + membership status + global user status; password hashes never returned).
 - `POST /api/v1/companies/{companyId}/users` — create a new ACTIVE user (password validated by `PasswordPolicy`, stored as BCrypt, `is_platform_admin` always written FALSE) with an ACTIVE membership; or attach an EXISTING user to the company — the platform administrator only, with no password accepted (no credential resets) and no profile rewrite.
