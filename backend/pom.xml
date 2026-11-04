@@ -12,9 +12,8 @@
     * NO customers/invoices/payments APIs and NO frontend.
 
   Migrations live in: backend/src/main/resources/db/migration (V1__*.sql, ...)
-  and are applied identically by BOTH:
-    * Spring Boot at application startup (spring.flyway.* in application.properties)
-    * the Flyway Maven plugin (configuration below) through scripts\run_db.ps1
+  and are applied by the operator using the Flyway Maven plugin and separate
+  migration credentials. Normal Spring Boot startup does not run Flyway.
 
   How to run the application (from backend\, after filling in your LOCAL
   .env.backend file - never share its values):
@@ -150,8 +149,8 @@
 
                 <configuration>
                     <url>${env.CPDTS_DB_URL}</url>
-                    <user>${env.CPDTS_DB_USER}</user>
-                    <password>${env.CPDTS_DB_PASSWORD}</password>
+                    <user>${env.CPDTS_MIGRATION_USER}</user>
+                    <password>${env.CPDTS_MIGRATION_PASSWORD}</password>
                     <locations>
                         <location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
                     </locations>

@@ -14,9 +14,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.context.WebApplicationContext;
 
 import com.cpdts.service.AccessControlService;
+import com.cpdts.config.RuntimeDatabaseGuard;
 
 /**
  * Base class for authentication-foundation integration tests.
@@ -31,6 +33,12 @@ import com.cpdts.service.AccessControlService;
  */
 @SpringBootTest
 public abstract class CpdtsIntegrationTest {
+
+    // These legacy integration fixtures require an owner to set up and clean up
+    // test rows. RuntimeDatabaseGuard is verified independently with a real
+    // restricted role; this replacement does not alter their assertions.
+    @MockitoBean
+    private RuntimeDatabaseGuard runtimeDatabaseGuard;
 
     @Autowired
     protected JdbcTemplate jdbc;

@@ -394,8 +394,7 @@ public class InvoiceManagementService {
 
         if (changeItems) {
             // Replace the item set inside the same transaction. The items
-            // table has no no-delete trigger (only invoices/customers do),
-            // and the invoice is still a DRAFT, so replacement is legal.
+            // database trigger permits deletion only while the invoice is DRAFT.
             jdbc.update(
                     "DELETE FROM invoice_items WHERE company_id = ? AND invoice_id = ?",
                     companyId, invoiceId);

@@ -43,15 +43,14 @@ public class UserRepository {
     /**
      * Inserts a new ACTIVE, non-platform-admin user and returns its id.
      *
-     * <p>{@code is_platform_admin} is written EXPLICITLY as FALSE (never taken
-     * from any request): the platform-admin flag is written solely by the
+     * <p>{@code is_platform_admin} uses its database default of FALSE: the flag is written solely by the
      * one-time bootstrap. The password is always an already-encoded BCrypt
      * hash - raw passwords never reach this class.
      */
     public long insert(String email, String passwordHash, String fullName) {
         Long id = jdbc.queryForObject("""
-                INSERT INTO users (email, password_hash, full_name, status, is_platform_admin)
-                VALUES (?, ?, ?, 'ACTIVE', FALSE)
+                INSERT INTO users (email, password_hash, full_name, status)
+                VALUES (?, ?, ?, 'ACTIVE')
                 RETURNING id
                 """, Long.class, email, passwordHash, fullName);
         if (id == null) {

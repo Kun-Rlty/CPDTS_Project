@@ -288,6 +288,16 @@ Reports reconcile with known test scenarios and are access-controlled.
 
 ## 11. Phase 9 — Hardening, UAT, and production readiness
 
+### Bounded prototype review (2026-11-04)
+
+Local prototype workflows were exercised by the guarded browser suite (5 passed), frontend checks (59 tests, typecheck and build), and non-destructive backend regressions (9 passed). An isolated copy of the backend with its test datasource and base guard pointed exclusively to a newly created disposable database ran 138 broader tests, including the existing report permission-denial test, without truncating the retained databases. A logical backup and restore with synthetic financial data was demonstrated in disposable databases; see README for limitations and procedure. This is not production or online-pilot approval. Least-privilege runtime/migration credentials, HTTPS and routing verification, login abuse protection, audit/logging review, operational monitoring, backup policy and representative UAT remain open. Customer statements, company settings and audit-log UI in the broader draft remain incomplete; exports, uploads and recovery remain deferred.
+
+Database least-privilege work: V9 adds locking draft-only invoice-item enforcement and forward-only invoice lifecycle, and normal user creation relies on the non-platform-admin default. Normal runtime no longer runs Flyway; migration credentials and the runtime grant script are separate. Disposable PostgreSQL checks and a runtime-role API workflow succeeded; local dev/test credentials and ownership were not changed. Focused backend regressions passed 37 tests in an isolated disposable database; a broader run timed out before completion, so it is not a full-suite pass. Effective grants and setup must still be independently reviewed for the intended environment; see README. Other pilot controls remain open.
+
+Follow-up: the runtime now checks Flyway history read-only and rejects superuser and object-owner/owner-member connections. Migration, checksum validation and runtime grants remain separate operator steps. Disposable restricted-role startup, denied-owner/member cases, unsuccessful V9, privilege checks and a live API workflow passed. The previously timed-out payment endpoint suite passed in a bounded disposable rerun; the cause of the prior timestamp gap remains unknown. Legacy integration tests use owner credentials for fixture setup and replace the startup guard in test context; guard behavior is tested separately.
+
+Verification limitations: the two suites hard-coded to retained `cpdts_test` were excluded from the disposable reruns; no restricted-role browser rerun was performed. Both existing local databases remain at V8 and use a superuser connection, so the new runtime will reject them until an approved upgrade. Read-only inspection found an existing platform admin in `cpdts_dev`; preserve it and do not rerun bootstrap. Existing object ownership requires an explicitly authorized migration plan.
+
 ### Tasks
 1. Run full automated test suite and critical manual test journeys.
 2. Review security configuration, dependency risks, file uploads, logs, and secrets.

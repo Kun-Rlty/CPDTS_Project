@@ -59,12 +59,6 @@ Get-Content $envFile | ForEach-Object {
     }
 }
 
-if (-not $env:DB_USER) { Fail 'DB_USER is missing in .env.backend.' }
-if (-not $env:DB_PASSWORD) { Fail 'DB_PASSWORD is missing in .env.backend.' }
-if ($env:DB_PASSWORD -eq 'REPLACE_LOCALLY_DO_NOT_COMMIT') {
-    Fail 'DB_PASSWORD in .env.backend is still the placeholder. Edit the file locally and set your real password there (and only there).'
-}
-
 $dbHost = if ($env:DB_HOST) { $env:DB_HOST } else { 'localhost' }
 $dbPort = if ($env:DB_PORT) { $env:DB_PORT } else { '5432' }
 $dbName = if ($Database -eq 'dev') { $env:DB_NAME } else { $env:DB_TEST_NAME }
@@ -74,6 +68,7 @@ if ($dbName -eq 'cpdts') {
 }
 
 if ($Task -eq 'test') {
+    if (-not $env:DB_USER -or -not $env:DB_PASSWORD) { Fail 'DB_USER and DB_PASSWORD are required for constraint tests.' }
     if ($Database -ne 'test') {
         Fail 'Constraint tests are only allowed against the disposable test database (-Database test).'
     }
@@ -96,9 +91,12 @@ if ($Task -eq 'test') {
 }
 
 # Tasks: info / validate / migrate via the Flyway Maven plugin.
+if (-not $env:DB_MIGRATION_USER -or -not $env:DB_MIGRATION_PASSWORD -or $env:DB_MIGRATION_PASSWORD -eq 'REPLACE_LOCALLY_DO_NOT_COMMIT') {
+    Fail 'DB_MIGRATION_USER and DB_MIGRATION_PASSWORD are required for Flyway; runtime credentials are not used for migrations.'
+}
 $env:CPDTS_DB_URL = "jdbc:postgresql://${dbHost}:${dbPort}/${dbName}"
-$env:CPDTS_DB_USER = $env:DB_USER
-$env:CPDTS_DB_PASSWORD = $env:DB_PASSWORD
+$env:CPDTS_MIGRATION_USER = $env:DB_MIGRATION_USER
+$env:CPDTS_MIGRATION_PASSWORD = $env:DB_MIGRATION_PASSWORD
 
 $pom = Join-Path $root 'backend\pom.xml'
 if (-not (Test-Path $pom)) { Fail "Maven pom not found: $pom" }

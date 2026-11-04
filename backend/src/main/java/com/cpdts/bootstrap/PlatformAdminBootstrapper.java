@@ -42,9 +42,9 @@ public final class PlatformAdminBootstrapper {
     /** Fixed advisory-lock key so concurrent bootstrap attempts serialize. */
     public static final long BOOTSTRAP_LOCK_KEY = 76_202_610_28L;
 
-    /** Schema version this build expects (V1..V8). Bump whenever a new
+    /** Schema version this build expects (V1..V9). Bump whenever a new
      *  approved migration is added - the guard fails closed otherwise. */
-    public static final int EXPECTED_SCHEMA_VERSION = 8;
+    public static final int EXPECTED_SCHEMA_VERSION = 9;
 
     private final Supplier<Connection> connectionSupplier;
     private final PasswordEncoder passwordEncoder;

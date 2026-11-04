@@ -2,9 +2,11 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice, payment and company membership management.
+**Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice, payment, company membership and reports screens. This is a local prototype, not an online-pilot or production readiness approval.
 
-## Current phase: Reports frontend
+## Current phase: database least privilege (review in progress)
+
+**Existing local databases have not been upgraded.** Read-only inspection found `cpdts_dev` and retained `cpdts_test` at V8, using a superuser connection. The new runtime rejects both a V8 schema and a superuser/owner runtime role. Do not start it against either database until an owner-approved upgrade and independent grant review have been completed. The existing `cpdts_dev` platform administrator must be preserved; do not rerun the one-time bootstrap.
 
 What is implemented and covered by automated tests (136 tests against the real `cpdts_test` database):
 
@@ -133,9 +135,86 @@ mvn -B -f backend\pom.xml '-Dtest=UserAccessIsolationTest,PaymentReplayActorTest
 
 The ordinary backend integration suites that truncate scratch financial tables must not be run when preserving existing test data.
 
+### Prototype readiness and acceptance
+
+| Status | Scope |
+| --- | --- |
+| Complete for prototype | Session login/logout, company-scoped customers, invoices, manually verified payments and allocations/reversals, memberships, dashboard and supported reports. |
+| Incomplete | Online security and operating controls below; representative user acceptance; customer statement; company settings and audit-log UI from the broader draft requirements. |
+| Intentionally deferred | Exports, evidence uploads, recovery/global-user management, payment gateways, refunds and automatic allocations. |
+
+Before an online pilot: independently review and provision least-privilege runtime and separate migration credentials; enforce HTTPS and `CPDTS_SESSION_SECURE=true` behind a trusted proxy, verify cookie/CSRF and same-origin SPA/API routing; add login abuse protection; review sanitized error logging, audit privileged reads, monitoring and incident response; approve backup encryption, retention, RPO/RTO and recovery ownership; and complete UAT. Runtime Flyway is disabled and a datasource username must be supplied explicitly; existing local credentials have not been changed. Vite's proxy is development-only, and no online routing configuration is supplied. Sessions are provisional; recovery and revocation policies remain unresolved. API catch-all responses are generic, but the exception handler logs full exceptions and stack traces, which require sensitive-data review. Do not use real customer data for prototype checks.
+
+### Separate database credentials (new dedicated database)
+
+The following steps are for a **new, dedicated, operator-approved database**, not an instruction to alter `cpdts_dev` or retained `cpdts_test`. Back up and review ownership, existing role memberships, PUBLIC grants and application dependencies before separately planning conversion of any existing database. Never paste real passwords into SQL, command-line arguments, logs or chat; use a protected PostgreSQL password file or private prompts. Names below are placeholders, not pre-created accounts.
+
+1. A PostgreSQL administrator creates two dedicated login roles: `<migration_owner>` and `<runtime_login>`. Both must be `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT`, with no role memberships. Use `psql`'s `\password <role>` interactively for each password. Create a new database owned by `<migration_owner>` using a separately authorized administrator. Do not grant the runtime role membership in the migration role.
+2. Database administrators must inventory the target database's `PUBLIC` and inherited grants. On a dedicated database, `REVOKE TEMPORARY ON DATABASE <new_database> FROM PUBLIC` removes a default capability for **every** role in that database, so assess the impact and explicitly grant TEMPORARY only to other roles that need it. Verify that `PUBLIC` and role memberships do not convey schema CREATE, dangerous table/column privileges, ownership or DDL to runtime. This repository does not change unrelated roles or their grants automatically.
+3. Set `CPDTS_DB_URL` to the new database JDBC URL and set `CPDTS_MIGRATION_USER` and `CPDTS_MIGRATION_PASSWORD` privately for the migration process. Run `mvn -f backend\pom.xml flyway:migrate`, then `mvn -f backend\pom.xml flyway:validate`. Migration credentials are separate from `CPDTS_DB_USER`/`CPDTS_DB_PASSWORD`. Review Flyway output without publishing credentials. Normal startup does not migrate or perform Flyway checksum validation; the operator must do both before applying grants and starting the application.
+4. Connect to the intended database as its object-owning migration role and run `psql -h <host> -U <migration_owner> -d <new_database> -v runtime_role=<runtime_login> -f scripts/grant_runtime.sql`. The script refuses several unsafe pre-existing role, ownership, schema and PUBLIC-grant conditions; it is not a complete privilege audit. Review actual effective grants, column grants, object/function owners, default privileges and memberships after every migration. Identity-generated inserts were verified without granting runtime sequence privileges. Trigger functions use invoker security, not `SECURITY DEFINER`.
+5. For a first installation, run the one-time platform-admin bootstrap separately with the migration/administrative connection in `CPDTS_DB_USER`/`CPDTS_DB_PASSWORD`; do not give that connection to the running application. The bootstrap reads the administrator password interactively and checks schema version 9. Afterwards clear administrative environment variables and start the application in a new process using only the runtime connection in `CPDTS_DB_USER` and `CPDTS_DB_PASSWORD`. Do not overwrite `.env.backend` automatically.
+6. Verify the effective runtime role cannot create or alter objects, create temporary tables, truncate, modify audit/verification history or set `is_platform_admin`; verify normal workflows and both company boundaries. Runtime grants do not replace application authorization and cannot protect against an object owner or privileged database administrator. Audit INSERT and permitted application updates remain available to the service account. Reapply/review the runtime grant profile following approved migrations; future objects are not automatically granted.
+
+At startup the runtime uses its own connection to read `flyway_schema_history` and requires successful versions 1–9, with no failed or unknown versioned migrations. It rejects a superuser or a role that owns, or can assume an owner of, the database, `public` schema or its relations, functions or types. This targeted guard is **not** checksum validation or a complete effective-privilege audit. Grant read-only access to Flyway history by running the grant script after migration and validation; do not pass migration credentials to the running application. Existing `cpdts_test` browser fixtures use an owner connection and cannot run with this production guard unchanged; do not alter the retained database to make them pass.
+
+For step 1, in a private administrator `psql` session replace the placeholders with reviewed, simple lowercase identifiers (do not use real credentials in these commands):
+
+```sql
+CREATE ROLE <migration_owner> LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE <runtime_login> LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+\password <migration_owner>
+\password <runtime_login>
+CREATE DATABASE <new_database> OWNER <migration_owner> TEMPLATE template0;
+REVOKE TEMPORARY ON DATABASE <new_database> FROM PUBLIC;
+```
+
+The TEMPORARY revoke has the database-wide effect described in step 2. For step 3, in a private PowerShell session, set the JDBC URL and migration username as above, and enter the password without echo:
+
+```powershell
+$env:CPDTS_DB_URL = 'jdbc:postgresql://<host>:5432/<new_database>'
+$env:CPDTS_MIGRATION_USER = '<migration_owner>'
+$secure = Read-Host 'Migration database password' -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try { $env:CPDTS_MIGRATION_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+mvn -f backend\pom.xml flyway:migrate
+if ($LASTEXITCODE -ne 0) { throw 'Migration failed; do not start the application.' }
+mvn -f backend\pom.xml flyway:validate
+if ($LASTEXITCODE -ne 0) { throw 'Validation failed; do not start the application.' }
+Remove-Item Env:CPDTS_MIGRATION_PASSWORD
+```
+
+The process environment necessarily holds the credential while Maven runs; use a private terminal and clear it afterwards. For application startup use a separate private process, set `CPDTS_DB_USER` to `<runtime_login>`, enter `CPDTS_DB_PASSWORD` using the same no-echo pattern, set `CPDTS_DB_URL` to the reviewed database URL, and start the backend. Do not use these examples to change existing environments without an independently reviewed migration plan.
+
+Disposable verification used separate owner and runtime roles, Flyway V1–V9 and `tests/database/least_privilege_checks.sql`; it tested normal user insertion, flag escalation denial, draft replacement, issued/voided item protections, public/temporary DDL, TRUNCATE and audit mutation denial. A live API workflow under the non-owner runtime role covered sign-in, user and membership creation, customer, draft replacement, issue, payment, separate verification, allocation, reversal and reports. These local checks do not establish deployment security or replace the operator's effective-grant audit.
+
+Verification limits: one earlier broad regression batch timed out with an unexplained timestamp gap; its payment endpoint suite passed on bounded rerun. The two classes hard-coded to retained `cpdts_test` were excluded from the new disposable batches, not counted as passes. No restricted-role browser/Playwright rerun was performed; the restricted-role workflow above exercised the live API. Legacy owner-based integration fixtures replace the runtime startup guard in their test context, and the guard was checked separately.
+
+Existing-database migration requires an operator-reviewed ownership plan: the inspected `cpdts_dev` Flyway history is owned by `postgres`, and V9 creates a trigger on an existing table. A newly created non-owner migration login cannot apply it without the required object ownership/authority. Do not assume the new-database instructions above transfer ownership. An authorized administrator may perform the controlled migration using the existing owner credential in the separate migration process, then apply runtime grants; any later ownership transfer needs its own reviewed plan. Never grant owner or migration-role membership to runtime.
+
+Manual acceptance on a dedicated test environment:
+1. Sign in and out, switch authorized companies, and confirm a company-only user cannot access the other company by URL or API.
+2. Create a test customer and invoice, issue it, record a payment, and verify that pending payments do not change debt.
+3. Sign in as a different authorized verifier, verify and allocate partially; check balances and then reverse with a reason and inspect preserved history.
+4. Change a test membership and confirm immediate self-access loss where appropriate; check the separate account and membership statuses.
+5. Filter and paginate each report, confirm current debt and verified credit are separate, and check desktop and mobile layouts.
+
+### Backup and restore (operator procedure)
+
+Backups contain confidential customer, financial, audit and password-hash data. Store encrypted outside this repository with restricted access; never commit dumps, logs or credentials. The following is a **logical backup and restore into a new isolated empty database**, not a command to overwrite a running database. Use a PostgreSQL client compatible with the server and an appropriately authorized backup/restore operator. Supply credentials privately (for example via a protected `PGPASSFILE`), not in commands, source control or console output.
+
+1. Identify and independently verify the source host, port and database. Coordinate a consistent backup and protect the archive and keys. PostgreSQL `pg_dump` creates a consistent database snapshot, but does not back up cluster roles or external configuration; document and restore those separately as needed.
+2. Back up using explicit placeholders replaced after verification: `pg_dump -h <host> -p <port> -U <backup-role> -Fc --no-owner --no-acl -f <secure-outside-repository-path> <source-database>`.
+3. On an isolated test server, create a **new, empty, explicitly named disposable** database using `createdb -h <test-host> -U <restore-role> -T template0 <new-disposable-database>`. Verify host and `SELECT current_database()` before proceeding. Never restore over `cpdts_dev`, retained `cpdts_test`, or a live database.
+4. Run `pg_restore -h <test-host> -U <restore-role> -d <new-disposable-database> --no-owner --no-acl --exit-on-error <secure-outside-repository-path>`. Validate Flyway history, representative customer/invoice/payment and audit records, constraints, triggers, role grants and application access; reconcile key balances against the source snapshot. These flags do not restore ownership or privileges; configure and verify them separately.
+5. Record results and elapsed time, protect or securely dispose of the backup and test copy according to the approved policy. A real recovery must use an approved, separately reviewed runbook; RPO, RTO, retention, offsite storage, encryption and recovery ownership are not yet decided.
+
+Local drill (2026-11-04): a fresh disposable database was migrated and populated with synthetic test data; a custom-format `pg_dump` was restored to a second newly created disposable database. Counts matched for 8 successful migrations, 265 audit rows, one customer, one invoice, one payment and 9 non-internal triggers. This was not a production-data restore, balance reconciliation, privilege validation, or an RPO/RTO demonstration. The isolated test archive is outside the repository. The broader destructive tests must never target retained databases: their test properties and base-class guard are hard-coded to `cpdts_test`, so a disposable-only isolated copy and explicit name guard were used for this review.
+
 ## Creating the first platform administrator
 
-Run from an **interactive terminal** (required so the password can be read without echo). Set the database variables from your local `.env.backend` WITHOUT printing them, then launch the bootstrap main class:
+Run from an **interactive terminal** (required so the password can be read without echo). This is an administrative operation: use the separate migration/administrative credential, never the restricted application runtime credential. The following example expects the operator to have privately supplied `DB_MIGRATION_USER` and `DB_MIGRATION_PASSWORD` in the local configuration; it does not alter that file.
 
 ```powershell
 # from the repository root
@@ -148,8 +227,8 @@ Get-Content .\.env.backend | ForEach-Object {
     }
 }
 $env:CPDTS_DB_URL  = "jdbc:postgresql://$(if ($kv.DB_HOST) { $kv.DB_HOST } else { 'localhost' }):$(if ($kv.DB_PORT) { $kv.DB_PORT } else { '5432' })/$(if ($kv.DB_NAME) { $kv.DB_NAME } else { 'cpdts_dev' })"
-$env:CPDTS_DB_USER = $kv.DB_USER
-$env:CPDTS_DB_PASSWORD = $kv.DB_PASSWORD
+$env:CPDTS_DB_USER = $kv.DB_MIGRATION_USER
+$env:CPDTS_DB_PASSWORD = $kv.DB_MIGRATION_PASSWORD
 
 mvn -f backend\pom.xml spring-boot:run "-Dspring-boot.run.main-class=com.cpdts.bootstrap.PlatformAdminBootstrap"
 ```
