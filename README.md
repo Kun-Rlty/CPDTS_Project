@@ -4,7 +4,7 @@ Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY 
 
 **Status:** Database foundation (Flyway V1–V8), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice, payment and company membership management.
 
-## Current phase: Users & Access frontend
+## Current phase: Reports frontend
 
 What is implemented and covered by automated tests (136 tests against the real `cpdts_test` database):
 
@@ -66,7 +66,7 @@ What is NOT implemented yet (future approved phases):
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
 - **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
 - **Refund processing, automatic allocation and a standalone allocation-reversal API** — deliberately out of scope: unallocated verified funds are customer credit, and only whole-payment reversal exists.
-- Company settings, audit-log and report-list frontend screens.
+- Company settings and audit-log frontend screens.
 
 ## Running the frontend locally
 
@@ -106,6 +106,8 @@ Invoices provide company-scoped search, lifecycle and customer ID filters, pagin
 Payments use `RECORD_VIEW` for lists/details, `PAYMENT_RECORD` for recording and explicit allocations, `PAYMENT_VERIFY` for decisions by someone other than the recorder, and `PAYMENT_REVERSE` for whole-payment reversal. Received dates/times are Tanzania business dates/times. Payment creation and allocation retain their original payload and idempotency key in the current browser tab's `sessionStorage`, scoped by user, company and operation, until a successful response or explicit reconciliation. This allows a deliberate identical retry after an uncertain response, including when balances have since changed; no mutation is retried automatically. **These pending financial details remain in the tab until resolved or the tab is closed**; closing the tab loses recovery information. Check server-side payment and allocation history before clearing a retry key or entering a changed request. Backend authorization, verification separation, balances and concurrency checks remain authoritative.
 
 Users & Access requires `USER_MANAGE` in the selected company. It lists the existing API's unpaginated membership results, separately showing global account status and company-membership status. Managers can create users and change membership roles/status; only platform admins can attach an existing account. The UI offers the four seeded assignable roles, never `PLATFORM_ADMIN`, and has no global-profile, global-status or credential-edit controls. Password input is not stored in browser storage or persisted form state and is cleared on submission or form exit. After a change to one's own membership, the UI refreshes session permissions and fails closed while access is refreshed.
+
+Reports requires `REPORT_VIEW` in the selected company. Customer debt, outstanding/overdue invoices and the payment register use server-side pagination and the existing API filters. Debt and verified unallocated credit are separate current balances, not historical balances. Payment date filters apply to received dates in Tanzania; payment statuses shown are current, not historical. No report-wide totals are inferred from a single page. Exports are not included.
 
 Idempotency replays are also bound to the original actor on the backend: another user cannot replay that actor's key even if they have company permission and know the request. The original actor can still retry the identical request.
 

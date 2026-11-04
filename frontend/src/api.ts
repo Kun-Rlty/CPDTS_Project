@@ -20,6 +20,11 @@ export type InvoicePage = { items: Invoice[]; totalElements: string; totalPages:
 export type InvoiceFields = { issueDate: string; dueDate: string; description: string; items: InvoiceItem[]; customerId?: string }
 export type Member = { userId: string; email: string; fullName: string; userStatus: string; membershipStatus: string; role: string }
 export type CreateMember = { email: string; role: string; fullName?: string; password?: string }
+export type ReportBasis = { businessDate: string; observedAt: string; zone: string; kind: string; currency: string; from: string | null; to: string | null }
+export type ReportPage<T> = { basis: ReportBasis; items: T[]; page: string; size: string; totalElements: string; totalPages: string }
+export type CustomerDebt = { customerId: string; customerCode: string | null; customerName: string; customerStatus: string; outstandingAmount: string; overdueAmount: string; unallocatedCredit: string }
+export type ReportKind = 'customers' | 'invoices' | 'payments'
+export type ReportFilters = { q: string; customerId: string; overdueOnly: string; status: string; method: string; from: string; to: string }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
@@ -47,6 +52,13 @@ export const api = {
     await request('/auth/logout', { method: 'POST', headers: { 'X-XSRF-TOKEN': token } })
   },
   dashboard: (id: string, signal: AbortSignal) => request<Dashboard>(`/companies/${encodeURIComponent(id)}/dashboard`, { signal }),
+  report: (company: string, kind: ReportKind, page: number, filters: ReportFilters, signal: AbortSignal) => {
+    const params = new URLSearchParams({ page: String(page), size: '20' })
+    const keys: (keyof ReportFilters)[] = kind === 'customers' ? ['q'] : kind === 'invoices' ? ['q', 'customerId', 'overdueOnly'] : ['q', 'customerId', 'status', 'method', 'from', 'to']
+    keys.forEach(key => { if (filters[key]) params.set(key, filters[key]) })
+    const path = kind === 'customers' ? 'debt/customers' : kind === 'invoices' ? 'debt/invoices' : 'payments'
+    return request<ReportPage<CustomerDebt | Invoice | PaymentRecord>>(`/companies/${encodeURIComponent(company)}/reports/${path}?${params}`, { signal })
+  },
   payments: (id: string, from: string, to: string, signal: AbortSignal) => {
     const query = new URLSearchParams({ from, to, size: '10' })
     return request<PaymentPage>(`/companies/${encodeURIComponent(id)}/reports/payments?${query}`, { signal })
