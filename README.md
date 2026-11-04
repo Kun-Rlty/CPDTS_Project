@@ -105,6 +105,30 @@ Invoices provide company-scoped search, lifecycle and customer ID filters, pagin
 
 Payments use `RECORD_VIEW` for lists/details, `PAYMENT_RECORD` for recording and explicit allocations, `PAYMENT_VERIFY` for decisions by someone other than the recorder, and `PAYMENT_REVERSE` for whole-payment reversal. Received dates/times are Tanzania business dates/times. Payment creation and allocation retain their original payload and idempotency key in the current browser tab's `sessionStorage`, scoped by user, company and operation, until a successful response or explicit reconciliation. This allows a deliberate identical retry after an uncertain response, including when balances have since changed; no mutation is retried automatically. **These pending financial details remain in the tab until resolved or the tab is closed**; closing the tab loses recovery information. Check server-side payment and allocation history before clearing a retry key or entering a changed request. Backend authorization, verification separation, balances and concurrency checks remain authoritative.
 
+Idempotency replays are also bound to the original actor on the backend: another user cannot replay that actor's key even if they have company permission and know the request. The original actor can still retry the identical request.
+
+### Browser integration tests (local disposable database only)
+
+Prerequisites: Node.js 22, Java/Maven, PostgreSQL and `psql`, Python with `bcrypt` (`python -m pip install bcrypt`), Microsoft Edge, and a migrated local `cpdts_test` database. `.env.backend` must contain the local DB credentials and `DB_TEST_NAME=cpdts_test`. From the repository root:
+
+```powershell
+cd frontend
+npm ci --legacy-peer-deps
+cd ..
+python scripts\run_browser_tests.py
+```
+
+The runner accepts no database/port overrides. It connects only to `localhost:5432/cpdts_test`, checks `current_database()` before fixture writes, and starts a test-only backend on port 18081 with Flyway disabled and an independent startup database guard. A separate Vite server on port 15173 proxies only to that backend; the runner refuses occupied ports and requires its private server marker before browser actions. The normal development servers on ports 8080/5173 are not used. Fixtures use random credentials and unique test-only users; those users are deactivated after the run. Financial and append-only audit records are retained: **the runner does not truncate, reset or delete database history**. Test server logs and Playwright output are local test artifacts and must not be committed.
+
+The guarded Playwright run completed two live browser tests: the desktop two-user create/issue/record/verify/allocate/retry/reverse flow (including cross-company isolation, logout and cross-user replay denial) and mobile customer, invoice and payment form interactions. These complement, rather than replace, the mocked frontend unit tests. For the non-destructive backend replay and guard regressions, after loading `CPDTS_DB_USER` and `CPDTS_DB_PASSWORD` as above, run:
+
+```powershell
+$env:CPDTS_DB_URL = 'jdbc:postgresql://localhost:5432/cpdts_test'
+mvn -B -f backend\pom.xml '-Dtest=PaymentReplayActorTest,BrowserTestServerGuardTest,PasswordPolicyTest' test
+```
+
+The ordinary backend integration suites that truncate scratch financial tables must not be run when preserving existing test data.
+
 ## Creating the first platform administrator
 
 Run from an **interactive terminal** (required so the password can be read without echo). Set the database variables from your local `.env.backend` WITHOUT printing them, then launch the bootstrap main class:

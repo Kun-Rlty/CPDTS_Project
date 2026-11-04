@@ -75,9 +75,10 @@ th { background: #f2f6fa; color: #465b69; }
 .status.pending_verification { background: #ffebcf; color: #714000; }
 .status.rejected, .status.reversed { background: #fde7e7; color: #922121; }
 .customer-panel { margin-bottom: 1rem; }
-.customer-form { display: grid; gap: .9rem; max-width: 38rem; }
+.customer-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: .9rem; min-width: 0; max-width: 38rem; }
+.customer-form fieldset { min-width: 0; max-width: 100%; }
 .customer-form label, .customer-filters label { display: grid; gap: .35rem; min-width: 0; }
-.customer-form input, .customer-form textarea, .customer-filters input, .customer-filters select { width: 100%; min-width: 0; }
+.customer-form input, .customer-form select, .customer-form textarea, .customer-filters input, .customer-filters select { width: 100%; min-width: 0; max-width: 100%; }
 .customer-form textarea { font: inherit; border: 1px solid #a9bac7; border-radius: 7px; padding: .65rem .75rem; resize: vertical; }
 .customer-filters, .actions, .pagination { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
 .customer-filters { margin-bottom: 1rem; }

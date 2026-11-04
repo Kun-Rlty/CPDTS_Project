@@ -169,7 +169,7 @@ public class PaymentManagementService {
         String hash = hashCreateRequest(request);
         ExistingKey existing = findKey(companyId, scope, key);
         if (existing != null) {
-            return new PaymentCreateResult(replayDetail(existing, hash, companyId, key), true);
+            return new PaymentCreateResult(replayDetail(existing, hash, companyId, actorId, key), true);
         }
         try {
             PaymentDetailDto created = transactionTemplate.execute(
@@ -179,7 +179,7 @@ public class PaymentManagementService {
             // A concurrent identical request won the key race; replay its result.
             ExistingKey raced = findKey(companyId, scope, key);
             if (raced != null) {
-                return new PaymentCreateResult(replayDetail(raced, hash, companyId, key), true);
+                return new PaymentCreateResult(replayDetail(raced, hash, companyId, actorId, key), true);
             }
             throw ex;
         }
@@ -328,7 +328,7 @@ public class PaymentManagementService {
         String hash = hashAllocateRequest(request);
         ExistingKey existing = findKey(companyId, scope, key);
         if (existing != null) {
-            return new AllocationResult(replayDetail(existing, hash, companyId, key), true);
+            return new AllocationResult(replayDetail(existing, hash, companyId, actorId, key), true);
         }
         try {
             PaymentDetailDto detail = transactionTemplate.execute(
@@ -338,7 +338,7 @@ public class PaymentManagementService {
         } catch (DataIntegrityViolationException ex) {
             ExistingKey raced = findKey(companyId, scope, key);
             if (raced != null) {
-                return new AllocationResult(replayDetail(raced, hash, companyId, key), true);
+                return new AllocationResult(replayDetail(raced, hash, companyId, actorId, key), true);
             }
             throw ex;
         }
@@ -695,15 +695,15 @@ public class PaymentManagementService {
     // Idempotency
     // ------------------------------------------------------------------
 
-    private record ExistingKey(long entityId, String requestHash) {
+    private record ExistingKey(long entityId, String requestHash, long actorId) {
     }
 
     private ExistingKey findKey(long companyId, String scope, String key) {
         return jdbc.query("""
-                SELECT entity_id, request_hash FROM idempotency_keys
+                SELECT entity_id, request_hash, actor_user_id FROM idempotency_keys
                 WHERE company_id = ? AND scope = ? AND idempotency_key = ?
                 """, (rs, rowNum) -> new ExistingKey(rs.getLong("entity_id"),
-                        rs.getString("request_hash")),
+                        rs.getString("request_hash"), rs.getLong("actor_user_id")),
                 companyId, scope, key).stream().findFirst().orElse(null);
     }
 
@@ -719,7 +719,10 @@ public class PaymentManagementService {
 
     /** Replay or reject, depending on whether the stored request matches. */
     private PaymentDetailDto replayDetail(ExistingKey existing, String hash, long companyId,
-            String key) {
+            long actorId, String key) {
+        if (existing.actorId() != actorId) {
+            throw new AccessDeniedException("idempotency key belongs to another actor");
+        }
         if (!existing.requestHash().equals(hash)) {
             throw new ConflictException(
                     "idempotency key was already used with a different request: " + key);

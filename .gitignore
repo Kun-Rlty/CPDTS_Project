@@ -19,6 +19,8 @@ build/
 .next/
 coverage/
 *.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
 
 # IDE / OS
 .idea/

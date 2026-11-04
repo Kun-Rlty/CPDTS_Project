@@ -198,6 +198,8 @@ Tasks 1–5 are implemented and covered by automated tests (20 new tests; 105 to
 
 Payment frontend: company-scoped list/details, recording, manual verification/rejection, explicit allocations and whole-payment reversal use the existing APIs and permissions. Create/allocation payloads and idempotency keys are retained in tab-scoped session storage for explicit retry after uncertain outcomes; closing the tab loses them. UI tests mock responses and do not replace live cross-user browser verification.
 
+Guarded live-browser verification now covers the two-user payment lifecycle, uncertain allocation replay, company switching and mobile navigation against local `cpdts_test` without resetting data. An exposed defect was fixed: idempotency replays now require the original actor as well as the existing company, scope, key and payload match. See README for the isolated runner and retained test-data behavior.
+
 ### Tasks
 1. Implement payment recording for cash, bank transfer, and mobile money.
 2. Validate amounts, method-specific fields, company, and references.
