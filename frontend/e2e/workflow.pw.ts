@@ -60,6 +60,16 @@ test('guarded real company payment lifecycle and uncertain allocation replay', a
   const customer = await (await customerResponse).json()
   await expect(page.getByText('Customer created.')).toBeVisible()
 
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Edit customer' })).toBeVisible()
+  await page.getByLabel('Phone').fill('+255 700 000 001')
+  await page.getByLabel('Notes').fill('Edited in the guarded browser workflow')
+  const editResponse = page.waitForResponse(r => /\/customers\/\d+$/.test(new URL(r.url()).pathname) && r.request().method() === 'PATCH' && r.status() === 200)
+  await page.getByRole('button', { name: 'Save customer' }).click()
+  await editResponse
+  await expect(page.getByText('Customer updated.')).toBeVisible()
+  await expect(page.getByText('+255 700 000 001', { exact: true })).toBeVisible()
+
   await choose(page, 'KAM')
   await page.getByLabel('Search customers').fill(name)
   await page.getByRole('button', { name: 'Search', exact: true }).click()
@@ -80,6 +90,14 @@ test('guarded real company payment lifecycle and uncertain allocation replay', a
   const invoiceResponse = page.waitForResponse(r => /\/invoices$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST' && r.status() === 201)
   await page.getByRole('button', { name: 'Save draft' }).click()
   const invoice = await (await invoiceResponse).json()
+  await page.getByRole('button', { name: 'Edit draft' }).click()
+  await expect(page.getByRole('heading', { name: 'Edit draft' })).toBeVisible()
+  await page.getByRole('group', { name: 'Item 1' }).getByLabel('Description').fill('Browser workflow edited item')
+  const draftResponse = page.waitForResponse(r => /\/invoices\/\d+$/.test(new URL(r.url()).pathname) && r.request().method() === 'PATCH' && r.status() === 200)
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await draftResponse
+  await expect(page.getByText('Draft updated.')).toBeVisible()
+  await expect(page.getByText('Browser workflow edited item')).toBeVisible()
   await page.getByRole('button', { name: 'Issue invoice' }).click()
   await expect(page.getByText('Invoice issued.')).toBeVisible()
 

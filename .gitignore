@@ -12,6 +12,10 @@ backend/target/
 *.class
 .gradle/
 
+# Python
+__pycache__/
+*.pyc
+
 # JS
 node_modules/
 dist/
