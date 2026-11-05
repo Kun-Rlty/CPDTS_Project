@@ -2,9 +2,9 @@
 
 Starter workspace for JEIMAX INVESTMENTS COMPANY (`JMX`) and KAMWERUKA SECURITY & SAFETY ADMINISTRATOR CO. LTD. (`KAM`).
 
-**Status:** Database foundation (Flyway V1–V9), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice, payment, company membership and reports screens. This is a local prototype, not an online-pilot or production readiness approval.
+**Status:** Database foundation (Flyway V1–V9), authentication, company access, customer, invoice, payment and company-scoped reporting backends are implemented. The frontend provides sign-in, company selection, dashboard, customer, invoice, payment, company membership and reports screens. A same-origin HTTPS reverse-proxy profile and a reproducible local HTTPS test setup were added in the current phase. This is still a local prototype: the proxy was verified locally, not deployed, and this is not an online-pilot or production readiness approval.
 
-## Current phase: least-privilege browser verification (disposable environment)
+## Current phase: least-privilege browser verification and HTTPS routing foundation (disposable environment)
 
 **Existing local databases remain owner-managed.** Read-only inspection on 2026-11-05 found `cpdts_dev` at V9 and connected with the restricted `cpdts_app` runtime login. The retained `cpdts_test` database, its data and its roles were not modified or used by the new browser runner. The runtime still rejects a superuser/owner role and requires successful Flyway versions 1–9; do not start it against another existing database until an owner-approved upgrade and independent grant review are complete. The existing `cpdts_dev` platform administrator must be preserved; do not rerun the one-time bootstrap.
 
@@ -66,7 +66,7 @@ Duplicate payment references remain permitted. Idempotency protects retries usin
 What is NOT implemented yet (future approved phases):
 
 - **Global management of existing users** — no global user directory, no global user status change, profile edit, password change/reset or account recovery (deliberate scope decision: company admins must not reach global account data; only the bootstrap writes `is_platform_admin`).
-- **Session revocation lists, multi-session limits, account recovery, HTTPS-only cookie enforcement in production** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`.
+- **Session revocation lists, multi-session limits and account recovery** — required before production per `docs/TECHNICAL_REQUIREMENTS.md`. Secure-cookie and proxy settings now exist, but HTTPS deployment itself is an operator step (see "HTTPS and same-origin routing" below).
 - **Refund processing, automatic allocation and a standalone allocation-reversal API** — deliberately out of scope: unallocated verified funds are customer credit, and only whole-payment reversal exists.
 - Company settings and audit-log frontend screens.
 
@@ -115,7 +115,7 @@ Idempotency replays are also bound to the original actor on the backend: another
 
 ### Browser integration tests (fresh disposable least-privilege database)
 
-Prerequisites: Node.js 22, Java/Maven, PostgreSQL 18 binaries (`initdb`, `pg_ctl`, `psql`; override the default `C:\Program Files\PostgreSQL\18\bin` with `CPDTS_PG_BIN` only if needed), Python with `bcrypt` (`python -m pip install bcrypt`), and Microsoft Edge. A migrated `cpdts_test` and database credentials in `.env.backend` are **not** required. From the repository root:
+Prerequisites: Node.js 22, Java/Maven, PostgreSQL 18 binaries (`initdb`, `pg_ctl`, `psql`; override the default `C:\Program Files\PostgreSQL\18\bin` with `CPDTS_PG_BIN` only if needed), Python with `bcrypt` (`python -m pip install bcrypt`), OpenSSL (for the local HTTPS certificate), and Microsoft Edge. A migrated `cpdts_test` and database credentials in `.env.backend` are **not** required. From the repository root:
 
 ```powershell
 cd frontend
@@ -140,6 +140,44 @@ mvn -B -f backend\pom.xml "-Dtest=BrowserTestServerGuardTest,RuntimeDatabaseGuar
 
 The older owner-based `UserAccessIsolationTest` and `PaymentReplayActorTest` are hard-coded to the retained `cpdts_test` and require owner writes, so they are not part of this disposable runner. The ordinary backend integration suites that truncate scratch financial tables must never be run against retained databases.
 
+### HTTPS and same-origin routing (local proof, not deployment)
+
+The proxy contract is defined by `deploy/nginx/cpdts.conf`, a template for the hosting step, and mirrored by `scripts/https_proxy.mjs` for local verification. Both serve the production SPA build and the API under one HTTPS origin:
+
+- `/api/` and `/actuator/health` are proxied to the backend; unknown API paths return a JSON 404 and are never replaced by `index.html`.
+- Missing `/assets/*` files and other file-like paths return 404; remaining paths fall back to `index.html` so SPA deep links survive a refresh.
+- Client-supplied `Forwarded`, `X-Forwarded-*` and `X-Real-IP` headers are removed and replaced by the proxy. The proxy also adds `X-CPDTS-Proxy-Token`, and the backend rejects any request that carries forwarded headers without the matching token (`400 untrusted_forwarded_headers`).
+- HSTS, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` are added. Only `/actuator/health` is exposed; other actuator paths return 404.
+
+Backend deployment profile (`SPRING_PROFILES_ACTIVE=proxy`, `application-proxy.properties`):
+
+- binds to `127.0.0.1` only;
+- trusts forwarded headers only from loopback (`server.tomcat.remoteip.internal-proxies=127.0.0.1/32,::1/128`);
+- sets the session cookie to `__Host-CPDTS_SESSION` with `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` and no `Domain`;
+- requires `CPDTS_PROXY_TOKEN`. Local HTTP development keeps the existing non-secure cookie and does not process forwarded headers.
+
+The guarded runner performs the local HTTPS proof automatically after the HTTP suite: it builds the frontend, generates a short-lived test CA and server certificate under the disposable run directory, starts a second backend with the `proxy` profile on `127.0.0.1:18082`, starts the local HTTPS proxy on `127.0.0.1:18443`, asserts that both listeners are loopback-only, and runs `frontend/e2e/https.pw.ts` (2 tests). The certificate chain is checked with `openssl verify`; because the CA is self-signed and local, Playwright uses `ignoreHTTPSErrors` for this origin only. Generated keys and certificates are deleted when the run finishes and are ignored by Git.
+
+To inspect the same origin manually, generate certificates into a directory outside the repository and trust the CA explicitly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_local_https_cert.ps1 -OutDir "$env:TEMP\opencode\cpdts-https-local"
+Import-Certificate -FilePath "$env:TEMP\opencode\cpdts-https-local\ca.crt" -CertStoreLocation 'Cert:\CurrentUser\Root'
+```
+
+Import only `ca.crt`, restart the browser, and remove the CA from `Cert:\CurrentUser\Root` when finished. Never commit `ca.key`, `server.key` or generated certificates. Do not install the test CA on a shared or production machine. To browse the built SPA through the local proxy, start `scripts/https_proxy.mjs` with `CPDTS_TLS_CERT`, `CPDTS_TLS_KEY`, `CPDTS_PROXY_TOKEN` and `CPDTS_UPSTREAM_PORT` set for a matching proxy-profile backend, then open `https://localhost:18443`.
+
+Operator steps for an actual host (not performed here):
+
+1. Build the frontend with `npm run build` and copy `frontend/dist` to the web root referenced by the template (`/var/www/cpdts`).
+2. Obtain a certificate for the real hostname from the approved CA and place `fullchain.pem`/`privkey.pem` at the paths in the template, restricted to the nginx service account. Do not use the local test CA.
+3. Generate a random proxy token, store it in `/etc/cpdts/proxy-token.conf` with mode `0600` (see `deploy/nginx/proxy-token.conf.example`), and set the same value as `CPDTS_PROXY_TOKEN` for the backend.
+4. Start the backend with `SPRING_PROFILES_ACTIVE=proxy` on loopback only. Keep port 8080 closed to the network and allow only the proxy to reach it.
+5. Replace the `server_name`/certificate-path placeholders, run `nginx -t`, reload nginx, and verify HTTPS redirect, HSTS, cookie flags, deep-link refresh, API 404 isolation and login/logout on the real host.
+6. Keep `.env.backend`, private keys and the real proxy token out of source control.
+
+Limitations: nginx is not installed on the development machine, so `deploy/nginx/cpdts.conf` is provided for the hosting step and was reviewed structurally but not executed. The verified artifact is the equivalent local Node HTTPS proxy. Trusting the local CA is a manual development convenience, not production certificate management. The local proof establishes the application/proxy contract only; it does not prove firewall, DNS, TLS-termination, certificate-renewal or hosting configuration. No deployment was performed, and no throttling, recovery or new modules were added.
+
 ### Prototype readiness and acceptance
 
 | Status | Scope |
@@ -148,7 +186,7 @@ The older owner-based `UserAccessIsolationTest` and `PaymentReplayActorTest` are
 | Incomplete | Online security and operating controls below; representative user acceptance; customer statement; company settings and audit-log UI from the broader draft requirements. |
 | Intentionally deferred | Exports, evidence uploads, recovery/global-user management, payment gateways, refunds and automatic allocations. |
 
-Before an online pilot: independently review and provision least-privilege runtime and separate migration credentials; enforce HTTPS and `CPDTS_SESSION_SECURE=true` behind a trusted proxy, verify cookie/CSRF and same-origin SPA/API routing; add login abuse protection; review sanitized error logging, audit privileged reads, monitoring and incident response; approve backup encryption, retention, RPO/RTO and recovery ownership; and complete UAT. Runtime Flyway is disabled and a datasource username must be supplied explicitly; existing local credentials have not been changed. Vite's proxy is development-only, and no online routing configuration is supplied. Sessions are provisional; recovery and revocation policies remain unresolved. API catch-all responses are generic, but the exception handler logs full exceptions and stack traces, which require sensitive-data review. Do not use real customer data for prototype checks.
+Before an online pilot: independently review and provision least-privilege runtime and separate migration credentials; deploy the supplied proxy template on the real host with a publicly trusted certificate, a private backend listener and the shared proxy token, then re-verify cookie/CSRF behavior and same-origin SPA/API routing there; add login abuse protection; review sanitized error logging, audit privileged reads, monitoring and incident response; approve backup encryption, retention, RPO/RTO and recovery ownership; and complete UAT. Runtime Flyway is disabled and a datasource username must be supplied explicitly; existing local credentials have not been changed. The local HTTPS proof does not configure or validate hosting, DNS, firewalls or certificate renewal. Sessions are provisional; recovery and revocation policies remain unresolved. API catch-all responses are generic, but the exception handler logs full exceptions and stack traces, which require sensitive-data review. Do not use real customer data for prototype checks.
 
 ### Separate database credentials (new dedicated database)
 
@@ -194,7 +232,9 @@ The process environment necessarily holds the credential while Maven runs; use a
 
 Disposable browser verification on 2026-11-05 used a fresh temporary PostgreSQL 18.4 cluster, separate one-time administrator, migration-owner and restricted runtime logins, Flyway V1–V9 migrate/validate, `scripts/grant_runtime.sql`, `tests/database/least_privilege_checks.sql` and `tests/database/runtime_denial_checks.sql`. The direct runtime checks recorded denials for `is_platform_admin` INSERT/UPDATE, audit and verification history UPDATE/DELETE, idempotency mutation, invoice-item update, customer company reassignment, company/user mutation, public and temporary DDL, `ALTER`/`DROP`, role creation and TRUNCATE of application tables. The backend then started on port 18081 with the runtime login and the normal `RuntimeDatabaseGuard` active. The guarded Playwright suite passed 5/5 tests, covering login, user creation and membership changes, platform-admin attachment and self-access loss, customer creation and edit, draft invoice creation and edit, issuance, separate-user verification, allocation with uncertain-response replay, reversal, reports and cross-company denials. Database-independent backend tests passed 14/14; frontend typecheck, 59 unit tests and the production build passed.
 
-An initial runner attempt stopped on a SQL guard syntax typo in the seed transaction before the application started; it was corrected and the full checks were rerun. Verification limits: this is a temporary cluster using the installed PostgreSQL 18 binaries, not a conversion or modification of `cpdts_dev` or retained `cpdts_test`; owner-based backend test classes hard-coded to `cpdts_test` were not run; and these local checks do not establish deployment security or replace an operator's complete effective-grant audit.
+HTTPS and routing verification (2026-11-05, same disposable database): the runner built the production SPA, started a second backend with the `proxy` profile on `127.0.0.1:18082`, and started the local HTTPS proxy on `127.0.0.1:18443`; both listeners were asserted to be loopback-only. The generated certificate chain verified with `openssl verify`, and the HTTPS Playwright suite passed 2/2. It covered login, refresh/session restore, logout, company switching, a protected mutation with valid CSRF, rejection without CSRF with no record created, cookie flags (`__Host-CPDTS_SESSION`, `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain`), SPA deep-link refresh, JSON API 404 isolation, missing-asset 404, HSTS, direct rejection of spoofed forwarded headers, and acceptance of proxy-sanitized headers. The first HTTPS attempt exposed an unknown-API-path 500; `ApiExceptionHandler` now returns a JSON 404, with a regression test, and the full run was repeated. Selected backend regressions passed 23/23 (`ApiExceptionHandlerTest`, `TrustedProxyHeadersFilterTest`, `BrowserTestServerGuardTest`, `RuntimeDatabaseGuardTest`, `PasswordPolicyTest`); frontend typecheck, 59 unit tests and the production build passed again.
+
+An initial runner attempt stopped on a SQL guard syntax typo in the seed transaction before the application started; it was corrected and the full checks were rerun. Verification limits: this is a temporary cluster using the installed PostgreSQL 18 binaries, not a conversion or modification of `cpdts_dev` or retained `cpdts_test`; owner-based backend test classes hard-coded to `cpdts_test` were not run; the nginx template was not executed because nginx is not installed; the HTTPS proof used a local self-signed test CA and the equivalent Node proxy; and these local checks do not establish deployment security, hosting configuration or replace an operator's complete effective-grant audit.
 
 Existing-database migration requires an operator-reviewed ownership plan: the inspected `cpdts_dev` Flyway history is owned by `postgres`, and V9 creates a trigger on an existing table. A newly created non-owner migration login cannot apply it without the required object ownership/authority. Do not assume the new-database instructions above transfer ownership. An authorized administrator may perform the controlled migration using the existing owner credential in the separate migration process, then apply runtime grants; any later ownership transfer needs its own reviewed plan. Never grant owner or migration-role membership to runtime.
 
@@ -250,12 +290,13 @@ The command prompts for email, full name and password (twice) with no echo. The 
 ## Folder map
 - `docs/`: six project specification documents.
 - `frontend/`: React + TypeScript frontend (Vite).
-- `backend/`: Spring Boot backend; Flyway migrations under `src/main/resources/db/migration` (V1–V8 applied).
+- `backend/`: Spring Boot backend; Flyway migrations under `src/main/resources/db/migration` (V1–V9 applied).
+- `deploy/`: reverse-proxy deployment template and token placeholder (not executed locally; no secrets).
 - `database/`: database-related notes/scripts after approval.
 - `tests/`: end-to-end and cross-module test assets.
-- `scripts/`: setup and maintenance scripts after approval (`scripts/run_db.ps1` for local Flyway tasks).
+- `scripts/`: guarded browser runner, local HTTPS proxy, local certificate generator and database setup helpers (`scripts/run_db.ps1` for local Flyway tasks).
 - `prompts/`: reusable OpenCode prompts.
 - `AGENTS.md`: baseline coding-agent instructions.
 
 ## Safety
-Do not commit passwords, database credentials, `.env`, or customer payment data. The `*.example` files are templates only. Local database credentials belong only in the gitignored `.env.backend`, which is read through environment variables (`CPDTS_DB_URL`, `CPDTS_DB_USER`, `CPDTS_DB_PASSWORD`) and never printed. Automated tests only ever run against the disposable `cpdts_test` database.
+Do not commit passwords, database credentials, `.env`, customer payment data, private keys, certificates or the real proxy boundary token. The `*.example` files are templates only. Local database credentials belong only in the gitignored `.env.backend`, which is read through environment variables (`CPDTS_DB_URL`, `CPDTS_DB_USER`, `CPDTS_DB_PASSWORD`) and never printed. Automated browser tests run only against disposable `cpdts_lp_*` databases created and removed by the guarded runner; they never target `cpdts_dev` or the retained `cpdts_test`. Local HTTPS certificates are generated under the disposable run directory (or another directory outside the repository) and are never committed.

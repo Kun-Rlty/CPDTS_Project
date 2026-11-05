@@ -1,0 +1,10 @@
+# CPDTS proxy boundary token (example).
+#
+# Generate a random value, then create /etc/cpdts/proxy-token.conf outside the
+# repository with mode 0600 containing the same value used for the backend's
+# CPDTS_PROXY_TOKEN environment variable:
+#
+#   set $cpdts_proxy_token "<64 random hex characters>";
+#
+# Never commit the real file or value. This example is not loaded by nginx.
+set $cpdts_proxy_token "REPLACE_WITH_RANDOM_TOKEN";

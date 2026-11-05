@@ -6,6 +6,13 @@
 !.env.frontend.example
 *.pem
 *.key
+# Local HTTPS test certificates (generated outside the repository as well)
+*.crt
+*.csr
+*.srl
+*.p12
+*.pfx
+*.jks
 
 # Java
 backend/target/

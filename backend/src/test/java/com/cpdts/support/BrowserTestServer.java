@@ -32,8 +32,27 @@ public class BrowserTestServer {
                 System.getenv("SPRING_APPLICATION_JSON"), System.getProperty("spring.application.json"), args);
         System.setProperty("spring.datasource.url", url);
         System.setProperty("spring.flyway.enabled", "false");
-        System.setProperty("server.port", "18081");
+        System.setProperty("server.port", Integer.toString(backendPort(System.getenv("CPDTS_BACKEND_PORT"))));
+        // The guarded test server is reached directly or through the local HTTPS
+        // proxy. It must never listen on a non-loopback interface.
+        System.setProperty("server.address", "127.0.0.1");
         new SpringApplication(CpdtsApplication.class, Guard.class).run();
+    }
+
+    /** Validates the optional test-server port used by the HTTPS proxy run. */
+    static int backendPort(String value) {
+        if (value == null || value.isBlank()) {
+            return 18081;
+        }
+        try {
+            int port = Integer.parseInt(value.trim());
+            if (port >= 1024 && port <= 65535) {
+                return port;
+            }
+        } catch (NumberFormatException ignored) {
+            // Fall through to the fail-closed error below.
+        }
+        throw new IllegalStateException("CPDTS_BACKEND_PORT must be a port between 1024 and 65535");
     }
 
     static void assertSafeTarget(String url, String nonce, String jsonEnv, String jsonProperty, String[] args) {

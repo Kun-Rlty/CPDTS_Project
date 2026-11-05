@@ -32,6 +32,8 @@ import java.util.Map;
  *   <li>HttpRequestMethodNotSupportedException -&gt; 405 with an Allow header
  *       (unsupported method on a known endpoint; previously fell through to
  *       the catch-all as a 500).</li>
+ *   <li>NoResourceFoundException -&gt; 404 {"error":"not_found"} for an unknown
+ *       API path. The reverse proxy sends /api/* here instead of index.html.</li>
  *   <li>Anything else -&gt; 500 with no internals leaked; only the exception
  *       type is logged (never request bodies or credentials).</li>
  * </ul>
@@ -106,6 +108,12 @@ public class ApiExceptionHandler {
                     .body(body.getBody());
         }
         return body;
+    }
+
+    /** Unknown static/API path: 404 JSON, never a 500 or the SPA shell. */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<Map<String, String>> handleNoResource() {
+        return error(HttpStatus.NOT_FOUND, "not_found", "Unknown endpoint");
     }
 
     @ExceptionHandler(Exception.class)

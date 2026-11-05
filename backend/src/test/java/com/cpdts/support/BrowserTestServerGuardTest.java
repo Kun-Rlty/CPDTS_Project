@@ -51,6 +51,17 @@ class BrowserTestServerGuardTest {
     }
 
     @Test
+    void acceptsOnlyValidTestServerPorts() {
+        assertThat(BrowserTestServer.backendPort(null)).isEqualTo(18081);
+        assertThat(BrowserTestServer.backendPort("  ")).isEqualTo(18081);
+        assertThat(BrowserTestServer.backendPort("18082")).isEqualTo(18082);
+        for (String value : new String[] { "80", "0", "65536", "-1", "not-a-port" }) {
+            assertThatThrownBy(() -> BrowserTestServer.backendPort(value))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
     void rejectsConfigurationOverrides() {
         assertThatThrownBy(() -> BrowserTestServer.assertSafeTarget(
                 "jdbc:postgresql://localhost:55432/cpdts_lp_abcdef123456", "nonce", "{}", null, new String[0]))

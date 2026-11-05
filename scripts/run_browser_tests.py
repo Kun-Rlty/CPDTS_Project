@@ -9,12 +9,19 @@ owner, and starts the application with the runtime role only.
 It never reads owner credentials from .env.backend, never touches cpdts_dev or
 the retained cpdts_test database, and removes the disposable cluster at the end.
 Generated passwords are process-local and are never printed.
+
+After the HTTP development-profile browser suite, the runner builds the SPA,
+starts a second backend with the proxy profile, starts the local HTTPS reverse
+proxy, and verifies same-origin routing, secure cookies, CSRF, deep links and
+the forwarded-header boundary. The HTTPS certificate and keys are generated
+under the disposable run directory and removed afterwards.
 """
 import os
 import pathlib
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -29,7 +36,9 @@ FRONTEND = ROOT / 'frontend'
 PG_BIN = pathlib.Path(os.environ.get('CPDTS_PG_BIN', r'C:\Program Files\PostgreSQL\18\bin'))
 PG_PORT = 55432
 BACKEND_PORT = 18081
+HTTPS_BACKEND_PORT = 18082
 FRONTEND_PORT = 15173
+HTTPS_PORT = 18443
 SECRETS = []
 
 
@@ -47,15 +56,15 @@ def free_port(port):
         sock.bind(('127.0.0.1', port))
 
 
-def run(args, *, env=None, input_text=None, timeout=300, log_path=None):
+def run(args, *, env=None, input_text=None, timeout=300, log_path=None, cwd=ROOT):
     """Run a command; never include generated passwords in raised errors."""
     if log_path is not None:
         with open(log_path, 'a', encoding='utf-8') as log:
-            result = subprocess.run(args, cwd=ROOT, env=env, input=input_text, text=True,
+            result = subprocess.run(args, cwd=cwd, env=env, input=input_text, text=True,
                                     stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
         output = pathlib.Path(log_path).read_text(encoding='utf-8', errors='replace')
     else:
-        result = subprocess.run(args, cwd=ROOT, env=env, input=input_text, text=True,
+        result = subprocess.run(args, cwd=cwd, env=env, input=input_text, text=True,
                                 capture_output=True, timeout=timeout)
         output = (result.stdout or '') + (result.stderr or '')
     if result.returncode != 0:
@@ -75,18 +84,37 @@ def psql(psql_path, *, port, user, database, password, sql=None, script=None, va
     return run(args, env=env, input_text=sql, timeout=180)
 
 
-def wait(url, nonce, process):
+def wait(url, nonce, process, context=None):
     for _ in range(240):
         if process.poll() is not None:
             raise RuntimeError('A test server exited before readiness; inspect the retained logs.')
         try:
-            with urllib.request.urlopen(url, timeout=1) as response:
+            with urllib.request.urlopen(url, timeout=1, context=context) as response:
                 if response.headers.get('X-CPDTS-Browser-Test') == nonce:
                     return
-        except (OSError, ValueError):
+        except (OSError, ValueError, ssl.SSLError):
             pass
         time.sleep(1)
     raise RuntimeError('Timed out waiting for the guarded test server.')
+
+
+def assert_loopback_listener(port, label):
+    """Fail if the server listens on anything except loopback."""
+    command = ("Get-NetTCPConnection -State Listen -LocalPort %d -ErrorAction Stop "
+               "| Select-Object -ExpandProperty LocalAddress" % port)
+    try:
+        result = subprocess.run(['powershell', '-NoProfile', '-Command', command],
+                                text=True, capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f'Could not inspect the {label} listener: {error}') from error
+    if result.returncode != 0:
+        raise RuntimeError(f'No listening {label} socket was found on port {port}.')
+    addresses = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not addresses:
+        raise RuntimeError(f'No listening {label} socket was found on port {port}.')
+    unsafe = [address for address in addresses if address not in ('127.0.0.1', '::1')]
+    if unsafe:
+        raise RuntimeError(f'{label} is listening on non-loopback address(es): {", ".join(unsafe)}')
 
 
 def stop_cluster(data_dir, log_path):
@@ -109,13 +137,87 @@ def stop_cluster(data_dir, log_path):
             pass
 
 
+def run_https_suite(*, npm, mvn, backend_env, ui_env, nonce, logs, tls_dir,
+                    processes, open_files):
+    """Build the SPA, start a proxy-profile backend and HTTPS proxy, run HTTPS tests."""
+    run([npm, 'run', 'build'], cwd=FRONTEND, env=ui_env,
+        log_path=logs / 'frontend-build.log', timeout=600)
+
+    powershell = shutil.which('powershell') or shutil.which('powershell.exe')
+    openssl = shutil.which('openssl')
+    node = shutil.which('node')
+    if not powershell or not openssl or not node:
+        raise RuntimeError('PowerShell, OpenSSL and Node are required for the HTTPS checks.')
+    run([powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+         str(ROOT / 'scripts/create_local_https_cert.ps1'),
+         '-OutDir', str(tls_dir), '-Days', '2'],
+        log_path=logs / 'tls-generate.log', timeout=180)
+    run([openssl, 'verify', '-CAfile', str(tls_dir / 'ca.crt'), str(tls_dir / 'server.crt')],
+        log_path=logs / 'tls-verify.log', timeout=60)
+
+    proxy_token = secrets.token_urlsafe(32)
+    SECRETS.append(proxy_token)
+
+    # A second application instance uses the same disposable database, but the
+    # deployment profile: loopback-only listener, secure cookie and trusted
+    # proxy boundary. The HTTP development-profile instance stays untouched.
+    https_env = backend_env.copy()
+    https_env.update(SPRING_PROFILES_ACTIVE='proxy', CPDTS_PROXY_TOKEN=proxy_token,
+                     CPDTS_BACKEND_PORT=str(HTTPS_BACKEND_PORT))
+    https_backend_log = open(logs / 'https-backend.log', 'w', encoding='utf-8')
+    open_files.append(https_backend_log)
+    https_backend = subprocess.Popen(
+        [mvn, '-B', '-f', str(ROOT / 'backend/pom.xml'), 'spring-boot:test-run',
+         '-Dspring-boot.run.main-class=com.cpdts.support.BrowserTestServer'],
+        cwd=ROOT, env=https_env, stdout=https_backend_log, stderr=subprocess.STDOUT)
+    processes.append(https_backend)
+    wait(f'http://127.0.0.1:{HTTPS_BACKEND_PORT}/api/v1/auth/csrf', nonce, https_backend)
+    assert_loopback_listener(BACKEND_PORT, 'HTTP test backend')
+    assert_loopback_listener(HTTPS_BACKEND_PORT, 'HTTPS test backend')
+
+    proxy_env = os.environ.copy()
+    for key in ('CPDTS_DB_URL', 'CPDTS_DB_USER', 'CPDTS_DB_PASSWORD',
+                'CPDTS_MIGRATION_USER', 'CPDTS_MIGRATION_PASSWORD', 'PGPASSWORD',
+                'CPDTS_E2E_A', 'CPDTS_E2E_B', 'CPDTS_E2E_PLATFORM',
+                'CPDTS_E2E_CREATED', 'CPDTS_E2E_PASSWORD', 'CPDTS_E2E_NONCE'):
+        proxy_env.pop(key, None)
+    proxy_env.update(CPDTS_HTTPS_PORT=str(HTTPS_PORT),
+                     CPDTS_UPSTREAM_PORT=str(HTTPS_BACKEND_PORT),
+                     CPDTS_DIST=str(FRONTEND / 'dist'),
+                     CPDTS_TLS_CERT=str(tls_dir / 'server.crt'),
+                     CPDTS_TLS_KEY=str(tls_dir / 'server.key'),
+                     CPDTS_PROXY_TOKEN=proxy_token)
+    proxy_log = open(logs / 'https-proxy.log', 'w', encoding='utf-8')
+    open_files.append(proxy_log)
+    proxy = subprocess.Popen([node, str(ROOT / 'scripts/https_proxy.mjs')], cwd=ROOT,
+                             env=proxy_env, stdout=proxy_log, stderr=subprocess.STDOUT)
+    processes.append(proxy)
+    wait(f'https://localhost:{HTTPS_PORT}/api/v1/auth/csrf', nonce, proxy,
+         context=ssl._create_unverified_context())
+    assert_loopback_listener(HTTPS_PORT, 'HTTPS test proxy')
+
+    https_ui_env = ui_env.copy()
+    https_ui_env.update(CPDTS_HTTPS_BACKEND_PORT=str(HTTPS_BACKEND_PORT),
+                        CPDTS_HTTPS_PORT=str(HTTPS_PORT))
+    result = subprocess.run(
+        [npm, 'exec', '--', 'playwright', 'test', '--config=playwright.https.config.ts'],
+        cwd=FRONTEND, env=https_ui_env, text=True, capture_output=True, timeout=900)
+    output = (result.stdout or '') + (result.stderr or '')
+    (logs / 'playwright-https.log').write_text(redact(output), encoding='utf-8')
+    if result.returncode != 0:
+        raise RuntimeError('HTTPS Playwright suite failed:\n' + redact(output[-12000:]))
+    print(redact(output), flush=True)
+    print('HTTPS proxy checks: production build, secure cookie, SPA routing, CSRF, '
+          'forwarded-header boundary and loopback-only listeners passed.', flush=True)
+
+
 def main():
     if sys.argv[1:]:
         raise RuntimeError('This runner accepts no database, server or port overrides.')
     for name in ('initdb.exe', 'pg_ctl.exe', 'psql.exe'):
         if not (PG_BIN / name).is_file():
             raise RuntimeError(f'PostgreSQL binary not found: {PG_BIN / name}')
-    for port in (PG_PORT, BACKEND_PORT, FRONTEND_PORT):
+    for port in (PG_PORT, BACKEND_PORT, HTTPS_BACKEND_PORT, FRONTEND_PORT, HTTPS_PORT):
         free_port(port)
 
     temp_root = pathlib.Path(tempfile.gettempdir()) / 'opencode'
@@ -124,6 +226,7 @@ def main():
     logs = run_root / 'logs'
     logs.mkdir()
     data_dir = run_root / 'pgdata'
+    tls_dir = run_root / 'tls'
     admin_password_file = run_root / 'admin.pw'
     print(f'Disposable test artifacts: {run_root}', flush=True)
 
@@ -271,6 +374,9 @@ COMMIT;
             raise RuntimeError('Playwright failed:\n' + redact(playwright_output[-12000:]))
 
         print(redact(playwright_output), flush=True)
+        run_https_suite(npm=npm, mvn=mvn, backend_env=backend_env, ui_env=ui_env,
+                        nonce=nonce, logs=logs, tls_dir=tls_dir,
+                        processes=processes, open_files=open_files)
         print(f'Disposable database: {database} (removed after the run)', flush=True)
         print(f'Migration owner role: {owner_role}; application runtime role: {runtime_role}', flush=True)
         print('Database privilege checks: least privilege and direct runtime denial passed.', flush=True)
@@ -300,9 +406,11 @@ COMMIT;
         stop_cluster(data_dir, logs / 'pg_ctl-stop.log')
         for handle in open_files:
             handle.close()
-        # Remove the cluster data and any local password material; keep logs only.
+        # Remove the cluster data, local certificate keys and password material;
+        # keep logs only.
         admin_password_file.unlink(missing_ok=True)
         shutil.rmtree(data_dir, ignore_errors=True)
+        shutil.rmtree(tls_dir, ignore_errors=True)
         print(f'Retained test logs: {logs}', flush=True)
 
 
