@@ -33,6 +33,15 @@ public class BrowserTestServer {
         System.setProperty("spring.datasource.url", url);
         System.setProperty("spring.flyway.enabled", "false");
         System.setProperty("server.port", Integer.toString(backendPort(System.getenv("CPDTS_BACKEND_PORT"))));
+        // Documented prototype login-throttle defaults. The test classpath's
+        // application.properties raises thresholds for the cpdts_test suites
+        // (shared 127.0.0.1 bucket); the guarded browser run must exercise the
+        // SAME defaults documented for operators. Keep in sync with
+        // src/main/resources/application.properties.
+        System.setProperty("cpdts.login-throttle.account-failures", "5");
+        System.setProperty("cpdts.login-throttle.ip-failures", "20");
+        System.setProperty("cpdts.login-throttle.cooldown-seconds", "300");
+        System.setProperty("cpdts.login-throttle.max-entries", "10000");
         // The guarded test server is reached directly or through the local HTTPS
         // proxy. It must never listen on a non-loopback interface.
         System.setProperty("server.address", "127.0.0.1");

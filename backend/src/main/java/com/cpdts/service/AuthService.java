@@ -21,10 +21,12 @@ import com.cpdts.security.CpdtsAuthenticationToken;
 import com.cpdts.security.CpdtsPrincipal;
 import com.cpdts.security.CpdtsUserDetails;
 import com.cpdts.security.EmailNormalizer;
+import com.cpdts.security.LoginThrottle;
 import com.cpdts.security.PasswordPolicy;
 import com.cpdts.web.AuthController.AuthSessionResponse;
 import com.cpdts.web.AuthController.CompanyDto;
 import com.cpdts.web.AuthController.UserDto;
+import com.cpdts.web.LoginThrottledException;
 
 /**
  * Login / logout / session queries for the authentication foundation.
@@ -40,6 +42,14 @@ import com.cpdts.web.AuthController.UserDto;
  *       BCrypt hash; plaintext is never stored or logged. Inputs beyond
  *       BCrypt's 72-byte UTF-8 limit are rejected BEFORE hashing so they can
  *       never be silently truncated into a shorter equivalent password.</li>
+ *   <li>Bounded login-abuse protection: a temporary cooldown is enforced
+ *       BEFORE any account lookup or password check, keyed by the normalized
+ *       email and the connection's remote address (never a client-supplied
+ *       forwarded header - proxy trust is enforced by TrustedProxyHeadersFilter
+ *       and Tomcat's RemoteIpValve in the proxy profile). While throttled the
+ *       response is the identical generic 429 + Retry-After for every account;
+ *       failed attempts increment both buckets, a successful sign-in clears
+ *       them, and counters age out after the cooldown (no permanent lockout).</li>
  *   <li>On success the security context is stored in the HTTP session and the
  *       session ID is rotated (session-fixation protection); the
  *       ActiveUserAuthenticationFilter re-checks account status on every
@@ -56,14 +66,16 @@ public class AuthService {
     private final UserRepository users;
     private final AccessControlService accessControlService;
     private final SecurityContextRepository securityContextRepository;
+    private final LoginThrottle loginThrottle;
 
     public AuthService(AuthenticationManager authenticationManager, UserRepository users,
             AccessControlService accessControlService,
-            SecurityContextRepository securityContextRepository) {
+            SecurityContextRepository securityContextRepository, LoginThrottle loginThrottle) {
         this.authenticationManager = authenticationManager;
         this.users = users;
         this.accessControlService = accessControlService;
         this.securityContextRepository = securityContextRepository;
+        this.loginThrottle = loginThrottle;
     }
 
     public AuthSessionResponse login(String email, String password,
@@ -87,16 +99,48 @@ public class AuthService {
                     + PasswordPolicy.MAX_LENGTH_BYTES + " UTF-8 bytes");
         }
 
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(normalizedEmail, rawPassword));
+        // Trusted client address: getRemoteAddr() is rewritten by Tomcat's
+        // RemoteIpValve ONLY for connections from the configured internal
+        // proxy (proxy profile), and spoofed forwarded headers never reach
+        // here (TrustedProxyHeadersFilter). In local HTTP development it is
+        // the direct peer address.
+        String clientIp = request.getRemoteAddr();
+
+        // Throttle check BEFORE any credential/account work: the 429 response
+        // cannot depend on whether the account exists.
+        java.util.Optional<java.time.Duration> cooldown =
+                loginThrottle.cooldownRemaining(normalizedEmail, clientIp);
+        if (cooldown.isPresent()) {
+            throw new LoginThrottledException(cooldown.get());
+        }
+
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(normalizedEmail, rawPassword));
+        } catch (BadCredentialsException | DisabledException failure) {
+            // Unknown email and wrong password take this identical path, so
+            // both count against the same buckets (no enumeration signal).
+            loginThrottle.recordFailure(normalizedEmail, clientIp);
+            throw failure;
+        }
 
         long userId = ((CpdtsUserDetails) authentication.getPrincipal()).userId();
-        UserRow user = users.findById(userId)
-                .orElseThrow(() -> new BadCredentialsException("invalid credentials"));
+        java.util.Optional<UserRow> found = users.findById(userId);
+        if (found.isEmpty()) {
+            loginThrottle.recordFailure(normalizedEmail, clientIp);
+            throw new BadCredentialsException("invalid credentials");
+        }
+        UserRow user = found.get();
         if (!user.isActive()) {
             // Only reached with a CORRECT password (see class javadoc).
+            loginThrottle.recordFailure(normalizedEmail, clientIp);
             throw new DisabledException("account disabled");
         }
+
+        // Credentials verified: clear this account's and this client's
+        // failure buckets before establishing the session.
+        loginThrottle.recordSuccess(normalizedEmail, clientIp);
 
         CpdtsPrincipal principal = new CpdtsPrincipal(user.id(), user.email(), user.fullName(),
                 user.platformAdmin());

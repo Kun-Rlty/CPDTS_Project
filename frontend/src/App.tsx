@@ -87,16 +87,35 @@ export default function App() {
 
 function Login({ onLogin, expired }: { onLogin: (s: Session) => void; expired: boolean }) {
   const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  // Seconds left on a temporary login cooldown (HTTP 429 + Retry-After).
+  // While > 0 the form refuses to submit: no automatic password resubmission,
+  // and the server-side cooldown is respected until it actually expires.
+  const [throttle, setThrottle] = useState(0)
+  useEffect(() => {
+    if (throttle <= 0) return
+    const timer = setInterval(() => setThrottle(n => (n > 0 ? n - 1 : 0)), 1000)
+    return () => clearInterval(timer)
+  }, [throttle > 0])
   async function submit(e: FormEvent) {
-    e.preventDefault(); setError('')
+    e.preventDefault()
+    if (throttle > 0) return // cooldown active: never auto-resubmit the password
+    setError('')
     if (!email.trim() || !password) { setError('Enter your email and password.'); return }
     setBusy(true)
     try { onLogin(await api.login(email.trim(), password)); setPassword('') }
-    catch (e) { setPassword(''); setError(e instanceof ApiError && e.status === 401 ? 'Email or password is incorrect.' : 'Unable to sign in. Check your details and try again.') }
+    catch (e) {
+      setPassword('')
+      if (e instanceof ApiError && e.status === 429) {
+        // Temporary abuse cooldown: show the countdown, disable retry until
+        // it expires, and never retry the request for the user.
+        setThrottle(Math.max(1, Math.ceil(e.retryAfter ?? 300)))
+        setError('')
+      } else setError(e instanceof ApiError && e.status === 401 ? 'Email or password is incorrect.' : 'Unable to sign in. Check your details and try again.')
+    }
     finally { setBusy(false) }
   }
   return <main className="login-page"><section className="login-card"><div className="brand"><span className="brand-mark" />CPDTS</div><p className="eyebrow">PAYMENT &amp; DEBT TRACKING</p><h1>Welcome back</h1><p>Sign in to access your company dashboard.</p>{expired && <p role="alert">Your session has expired. Please sign in again.</p>}
-    <form onSubmit={submit}><label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /><label htmlFor="password">Password</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />{error && <p className="error" role="alert">{error}</p>}<button disabled={busy} type="submit">{busy ? 'Signing in…' : 'Sign in'}</button></form><p className="subtle">Access is managed by your administrator.</p></section></main>
+    <form onSubmit={submit}><label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /><label htmlFor="password">Password</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />{throttle > 0 ? <p className="error" role="alert">Too many sign-in attempts. Sign-in is temporarily paused — try again in {throttle} second{throttle === 1 ? '' : 's'}. No account is permanently locked.</p> : error && <p className="error" role="alert">{error}</p>}<button disabled={busy || throttle > 0} type="submit">{busy ? 'Signing in…' : throttle > 0 ? `Try again in ${throttle}s` : 'Sign in'}</button></form><p className="subtle">Access is managed by your administrator.</p></section></main>
 }
 
 function Shell({ session, selected, select, path, go, onLogout, children }: { session: Session; selected: string; select: (id: string) => void; path: string; go: (path: string) => void; onLogout: () => Promise<void>; children: React.ReactNode }) {

@@ -24,6 +24,9 @@ import java.util.Map;
  *       on purpose) -&gt; 401 {"error":"invalid_credentials"}.</li>
  *   <li>DisabledException (correct password, inactive account) -&gt; 403
  *       {"error":"account_disabled"}.</li>
+ *   <li>LoginThrottledException (temporary abuse cooldown) -&gt; 429
+ *       {"error":"login_throttled"} with a Retry-After header; the response is
+ *       identical for unknown and existing accounts.</li>
  *   <li>AccessDeniedException -&gt; 403 {"error":"forbidden"}.</li>
  *   <li>IllegalArgumentException / unreadable JSON -&gt; 400.</li>
  *   <li>NotFoundException -&gt; 404 {"error":"not_found"}.</li>
@@ -51,6 +54,19 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<Map<String, String>> handleDisabled() {
         return error(HttpStatus.FORBIDDEN, "account_disabled", "Account is disabled");
+    }
+
+    /**
+     * Temporary login cooldown: 429 with Retry-After (delta-seconds). The
+     * message is static - the remaining time travels only in the header - and
+     * the body never reveals whether the account exists.
+     */
+    @ExceptionHandler(LoginThrottledException.class)
+    public ResponseEntity<Map<String, String>> handleLoginThrottled(LoginThrottledException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.retryAfterSeconds()))
+                .body(Map.of("error", "login_throttled",
+                        "message", "Too many sign-in attempts. Please try again later."));
     }
 
     @ExceptionHandler(AccessDeniedException.class)

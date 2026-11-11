@@ -27,14 +27,20 @@ export type ReportKind = 'customers' | 'invoices' | 'payments'
 export type ReportFilters = { q: string; customerId: string; overdueOnly: string; status: string; method: string; from: string; to: string }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message) }
+  /** Seconds from the Retry-After header on HTTP 429 (login throttling), else undefined. */
+  constructor(public status: number, message: string, public retryAfter?: number) { super(message) }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch('/api/v1' + path, { ...init, credentials: 'same-origin', cache: 'no-store' })
   const text = await response.text()
   const data = text ? parse(text, undefined, value => value) as Record<string, unknown> : null
-  if (!response.ok) throw new ApiError(response.status, typeof data?.message === 'string' ? data.message : 'Request failed')
+  if (!response.ok) {
+    // HTTP 429 (temporary login cooldown) carries a delta-seconds Retry-After.
+    const retryAfter = response.status === 429 ? Number(response.headers.get('Retry-After')) : NaN
+    throw new ApiError(response.status, typeof data?.message === 'string' ? data.message : 'Request failed',
+      Number.isFinite(retryAfter) && retryAfter >= 1 ? Math.ceil(retryAfter) : undefined)
+  }
   return data as T
 }
 

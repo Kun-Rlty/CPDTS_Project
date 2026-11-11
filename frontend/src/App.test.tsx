@@ -81,3 +81,38 @@ describe('session and dashboard', () => {
     expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument()
   })
 })
+
+describe('login throttling', () => {
+  it('explains the temporary cooldown, disables retry and clears the password', async () => {
+    vi.mocked(api.me).mockRejectedValue(new ApiError(401, 'Unauthenticated'))
+    vi.mocked(api.login).mockRejectedValue(new ApiError(429, 'Too many sign-in attempts. Please try again later.', 1))
+    start()
+    fireEvent.change(await screen.findByLabelText('Email address'), { target: { value: 'x@example.test' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret-password' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    // The UI explains the temporary pause (no lockout claim)...
+    expect(await screen.findByRole('alert')).toHaveTextContent('Too many sign-in attempts. Sign-in is temporarily paused — try again in 1 second. No account is permanently locked.')
+    // ...the password is cleared and retry is disabled with a countdown...
+    expect(screen.getByLabelText('Password')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Try again in 1s' })).toBeDisabled()
+    expect(api.login).toHaveBeenCalledTimes(1)
+    // ...and clicking the disabled control never resubmits the password.
+    fireEvent.click(screen.getByRole('button', { name: 'Try again in 1s' }))
+    expect(api.login).toHaveBeenCalledTimes(1)
+
+    // After the cooldown the form is usable again (manual retry only).
+    expect(await screen.findByRole('button', { name: 'Sign in' }, { timeout: 3000 })).toBeEnabled()
+    expect(api.login).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/temporarily paused/)).not.toBeInTheDocument()
+  })
+  it('falls back to the default cooldown when Retry-After is missing', async () => {
+    vi.mocked(api.me).mockRejectedValue(new ApiError(401, 'Unauthenticated'))
+    vi.mocked(api.login).mockRejectedValue(new ApiError(429, 'Too many sign-in attempts. Please try again later.'))
+    start()
+    fireEvent.change(await screen.findByLabelText('Email address'), { target: { value: 'x@example.test' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret-password' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('button', { name: 'Try again in 300s' })).toBeDisabled()
+  })
+})

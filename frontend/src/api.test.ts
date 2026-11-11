@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, formatMoney } from './api'
+import { api, ApiError, formatMoney } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 describe('API client', () => {
@@ -72,5 +72,36 @@ describe('API client', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"outstandingAmount":999999999999999999.12}', { status: 200 })))
     const data = await api.dashboard('1', new AbortController().signal)
     expect(formatMoney(data.outstandingAmount)).toBe('TZS 999,999,999,999,999,999.12')
+  })
+  it('parses Retry-After into retryAfter on a 429 login throttle response', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response('{"token":"csrf"}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"error":"login_throttled","message":"Too many sign-in attempts. Please try again later."}', { status: 429, headers: { 'Retry-After': '7' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const error = await api.login('user@example.test', 'wrong').catch(e => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.status).toBe(429)
+    expect(error.message).toBe('Too many sign-in attempts. Please try again later.')
+    expect(error.retryAfter).toBe(7)
+  })
+  it('leaves retryAfter undefined for non-429 failures even with a Retry-After header', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response('{"token":"csrf"}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"message":"Invalid email or password"}', { status: 401, headers: { 'Retry-After': '7' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const error = await api.login('user@example.test', 'wrong').catch(e => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.status).toBe(401)
+    expect(error.retryAfter).toBeUndefined()
+  })
+  it('leaves retryAfter undefined when a 429 has no Retry-After header', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response('{"token":"csrf"}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"error":"login_throttled","message":"Too many sign-in attempts. Please try again later."}', { status: 429 }))
+    vi.stubGlobal('fetch', fetcher)
+    const error = await api.login('user@example.test', 'wrong').catch(e => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.status).toBe(429)
+    expect(error.retryAfter).toBeUndefined()
   })
 })
